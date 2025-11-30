@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>성과 관리 시스템</title>
+    <title>성과 관리 시스템 Pro</title>
     
     <!-- React & ReactDOM (React 18) -->
     <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
@@ -13,7 +13,7 @@
     <script src="https://unpkg.com/prop-types/prop-types.min.js"></script>
 
     <!-- Recharts -->
-    <script src="https://unpkg.com/recharts@2.12.7/umd/Recharts.js"></script>f
+    <script src="https://unpkg.com/recharts@2.12.7/umd/Recharts.js"></script>
 
     <!-- Babel -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -26,7 +26,12 @@
     
     <style>
         @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css');
-        body { font-family: 'Pretendard', sans-serif; }
+        
+        /* Reset & Base Styles */
+        html, body { margin: 0; padding: 0; width: 100%; height: 100%; }
+        body { font-family: 'Pretendard', sans-serif; background-color: #f8fafc; color: #1e293b; }
+
+        /* Print Styles */
         .print-container { background: white; }
         
         /* Custom Scrollbar */
@@ -44,18 +49,17 @@
         }
 
         @media print {
-            @page { size: A4 landscape; margin: 10mm; } /* 가로 출력 설정 */
+            @page { size: A4 landscape; margin: 10mm; } 
             body { -webkit-print-color-adjust: exact; print-color-adjust: exact; background: white; font-size: 11px; }
             .no-print { display: none !important; }
             .print-break { break-inside: avoid; page-break-inside: avoid; }
             .print-container { padding: 0; margin: 0; max-width: 100% !important; box-shadow: none; border: none; }
             .print-hidden-bg { background-color: white !important; border: 1px solid #e2e8f0; }
-            /* 인쇄 시 그래프 크기 조정 */
             .recharts-wrapper { width: 100% !important; height: auto !important; }
         }
     </style>
 </head>
-<body class="bg-slate-50 text-slate-800">
+<body>
     <div id="root"></div>
 
     <script type="text/babel">
@@ -106,9 +110,7 @@
 
         const calculateAverage = (p) => {
             if (!p) return 0;
-            // Note: Self evaluation score is removed from calculation logic for Employee, 
-            // but Leader scores still exist. 
-            // This function is mainly used for display purposes if scores exist.
+            // Only leader scores exist now
             const sum = Number(p.scoreSpeed || 0) + Number(p.scoreQuality || 0) + Number(p.scoreComm || 0) + Number(p.scoreAccuracy || 0);
             if (sum === 0) return 0; 
             return (sum / 4).toFixed(1);
@@ -126,7 +128,6 @@
                 if (evalData) {
                     const s = Number(evalData.scoreSpeed || 0);
                     const q = Number(evalData.scoreQuality || 0);
-                    // Only count if actually evaluated (scores > 0)
                     if (s > 0 || q > 0) {
                         totalSpeed += s;
                         totalQuality += q;
@@ -356,7 +357,7 @@
             );
         };
 
-        // --- Compensation Card (Updated Logic) ---
+        // --- Compensation Card (Updated Logic V6) ---
         const CompensationCard = ({ overallScore, setCompData, compData, isPrint }) => {
             let grade = 'B-C';
             let rate = 0; 
@@ -426,7 +427,7 @@
             const selectedLevelInfo = SALARY_LEVELS.find(l => l.level === compData.level);
 
             return (
-                <div className="bg-white rounded-2xl shadow-lg border border-slate-200 p-6 mb-8 mt-8 print-break print-hidden-bg print:shadow-none print:border-slate-300">
+                <div className="bg-white rounded-2xl shadow-lg border border-slate-200 p-6 mb-8 mt-16 print-break print-hidden-bg print:shadow-none print:border-slate-300">
                     <div className="flex items-center gap-2 mb-6 border-b border-slate-100 pb-4">
                         <h2 className="text-xl font-bold text-slate-800">보상 및 레벨 평가</h2>
                     </div>
@@ -835,10 +836,10 @@
                         contribution: '',
                         opsStatus: '',
                         kpi: '',
-                        scoreSpeed: '', 
-                        scoreQuality: '',
-                        scoreComm: '',
-                        scoreAccuracy: '',
+                        scoreSpeed: 0, 
+                        scoreQuality: 0,
+                        scoreComm: 0,
+                        scoreAccuracy: 0,
                         notes: ''
                     }]
                 }));
@@ -940,7 +941,7 @@
                         if (parsed.leaderEvaluations) {
                             setLeaderEval(parsed.leaderEvaluations);
                         } else {
-                            // Initialize fresh evaluations
+                            // Initialize fresh evaluations with 0 (unselected)
                             const initEval = {};
                             parsed.projects.forEach((p, idx) => {
                                 initEval[idx] = {
@@ -1121,7 +1122,7 @@
                 );
             }
 
-            // 3. Employee View
+            // 3. Employee View오전 8:54 2025-12-01
             if (mode === 'employee') {
                 const autoPeriod = getAutoReviewPeriod();
                 return (
@@ -1300,7 +1301,7 @@
 
                                     {/* Summary Table */}
                                     <SummaryTable projects={importedData.projects} />
-                                    
+
                                     {/* Project List */}
                                     {importedData.projects.map((proj, idx) => (
                                         <ProjectCard 
@@ -1349,15 +1350,11 @@
             if (mode === 'leader-dashboard') {
                 if (!importedData) return null;
 
+                // Use the function to calculate incentive score
                 const incentiveScore = calculateIncentiveScore(importedData.projects, leaderEval);
-                const finalGrade = getGrade(incentiveScore);
 
-                const currentSal = parseNumber(compData.currentSalary);
-                const confirmedSal = parseNumber(compData.salaryAmount);
-                const increaseRate = currentSal > 0 ? ((confirmedSal - currentSal) / currentSal * 100).toFixed(1) : 0;
-                const increaseAmount = confirmedSal - currentSal;
+                let projectCount = importedData.projects.length;
 
-                // Summary data for table
                 const summaryData = importedData.projects.map((proj, idx) => {
                     const lScore = leaderEval[idx] ? Number(calculateAverage(leaderEval[idx])) : 0;
                     return {
@@ -1371,6 +1368,14 @@
                     };
                 });
 
+                // Final Avg for Grade
+                const finalAvg = incentiveScore; 
+                const finalGrade = getGrade(finalAvg);
+
+                const currentSal = parseNumber(compData.currentSalary);
+                const confirmedSal = parseNumber(compData.salaryAmount);
+                const increaseRate = currentSal > 0 ? ((confirmedSal - currentSal) / currentSal * 100).toFixed(1) : 0;
+                const increaseAmount = confirmedSal - currentSal;
 
                 return (
                     <div className="min-h-screen bg-slate-100 p-8 print:bg-white print:p-0">
@@ -1422,7 +1427,7 @@
                                 <div className="flex items-center gap-10 mt-6 md:mt-0">
                                     <div className="text-right">
                                         <p className="text-xs text-slate-400 uppercase font-bold mb-1">Incentive Score</p>
-                                        <p className="text-5xl font-bold text-slate-800">{incentiveScore} <span className="text-lg text-slate-400 font-normal">/ 10</span></p>
+                                        <p className="text-5xl font-bold text-slate-800">{finalAvg} <span className="text-lg text-slate-400 font-normal">/ 10</span></p>
                                     </div>
                                     <div className="w-px h-16 bg-slate-100 hidden md:block"></div>
                                     <div className="text-right">
@@ -1472,7 +1477,7 @@
                                 </div>
                             </div>
 
-                            {/* 3. Qualitative Feedback Report */}
+                             {/* 3. Qualitative Feedback Report */}
                              <div className="bg-white rounded-2xl shadow-lg border border-slate-200 p-6 mb-8 print-break print-hidden-bg print:shadow-none print:border-slate-300">
                                 <div className="flex items-center gap-2 mb-6 border-b border-slate-100 pb-4">
                                     <h2 className="text-xl font-bold text-slate-800">팀장 평가</h2>
