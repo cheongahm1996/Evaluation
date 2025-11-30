@@ -1,0 +1,1593 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>성과 관리 시스템 Pro V6.0 (Fix)</title>
+    
+    <!-- React & ReactDOM (React 18) -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    
+    <!-- Prop-types -->
+    <script src="https://unpkg.com/prop-types/prop-types.min.js"></script>
+
+    <!-- Recharts -->
+    <script src="https://unpkg.com/recharts@2.12.7/umd/Recharts.js"></script>
+
+    <!-- Babel -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- html2canvas -->
+    <script src="https://html2canvas.hertzen.com/dist/html2canvas.min.js"></script>
+    
+    <style>
+        @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css');
+        body { font-family: 'Pretendard', sans-serif; }
+        .print-container { background: white; }
+        
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #f1f1f1; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+        /* Input Capture Fix */
+        .capture-safe-input {
+            height: 3rem; /* h-12 = 48px */
+            line-height: 3rem; /* Matches height for vertical centering in html2canvas */
+            padding-top: 0;
+            padding-bottom: 0;
+        }
+
+        @media print {
+            @page { size: A4 landscape; margin: 10mm; } /* 가로 출력 설정 */
+            body { -webkit-print-color-adjust: exact; print-color-adjust: exact; background: white; font-size: 11px; }
+            .no-print { display: none !important; }
+            .print-break { break-inside: avoid; page-break-inside: avoid; }
+            .print-container { padding: 0; margin: 0; max-width: 100% !important; box-shadow: none; border: none; }
+            .print-hidden-bg { background-color: white !important; border: 1px solid #e2e8f0; }
+            /* 인쇄 시 그래프 크기 조정 */
+            .recharts-wrapper { width: 100% !important; height: auto !important; }
+        }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+        const { Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, ResponsiveContainer, Legend } = window.Recharts;
+
+        // --- Helper Functions ---
+        const formatNumber = (num) => {
+            if (!num) return '';
+            return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+        };
+
+        const parseNumber = (str) => {
+            if (!str) return 0;
+            return parseInt(str.replace(/,/g, ''), 10) || 0;
+        };
+
+        const getAutoReviewPeriod = () => {
+            const today = new Date();
+            const year = today.getFullYear();
+            const month = today.getMonth() + 1;
+            let quarter;
+
+            if (month >= 1 && month <= 3) quarter = '1분기';
+            else if (month >= 4 && month <= 6) quarter = '2분기';
+            else if (month >= 7 && month <= 9) quarter = '3분기';
+            else quarter = '4분기';
+
+            return { year, quarter };
+        };
+        
+        const generateFilename = (data, isLeader) => {
+            const now = new Date();
+            const dateStr = now.toISOString().slice(0,10).replace(/-/g, "");
+            const timeStr = now.toTimeString().slice(0,5).replace(":", "");
+            const periodStr = data.period ? `${data.period.year}${data.period.quarter}` : 'Unknown';
+            const typeStr = isLeader ? "팀장 평가 데이터" : "프로젝트 리뷰";
+            
+            return `${periodStr}_${dateStr}${timeStr}_${data.name}_${typeStr}.json`;
+        };
+
+        const getGrade = (score) => {
+            const numScore = Number(score);
+            if (numScore >= 9.0) return 'S';
+            if (numScore >= 8.0) return 'A';
+            return 'B-C';
+        };
+
+        const calculateAverage = (p) => {
+            if (!p) return 0;
+            // Note: Self evaluation score is removed from calculation logic for Employee, 
+            // but Leader scores still exist. 
+            // This function is mainly used for display purposes if scores exist.
+            const sum = Number(p.scoreSpeed || 0) + Number(p.scoreQuality || 0) + Number(p.scoreComm || 0) + Number(p.scoreAccuracy || 0);
+            if (sum === 0) return 0; 
+            return (sum / 4).toFixed(1);
+        };
+
+        const calculateIncentiveScore = (projects, leaderEvals) => {
+            if (!projects || projects.length === 0) return 0;
+            
+            let totalSpeed = 0;
+            let totalQuality = 0;
+            let validCount = 0;
+            
+            projects.forEach((p, idx) => {
+                const evalData = leaderEvals[idx];
+                if (evalData) {
+                    const s = Number(evalData.scoreSpeed || 0);
+                    const q = Number(evalData.scoreQuality || 0);
+                    // Only count if actually evaluated (scores > 0)
+                    if (s > 0 || q > 0) {
+                        totalSpeed += s;
+                        totalQuality += q;
+                        validCount++;
+                    }
+                }
+            });
+
+            if (validCount === 0) return 0;
+
+            const avgSpeed = totalSpeed / validCount;
+            const avgQuality = totalQuality / validCount;
+
+            // Formula: (Speed * 0.6) + (Quality * 0.4)
+            return ((avgSpeed * 0.6) + (avgQuality * 0.4)).toFixed(2);
+        };
+
+        // --- Icon Components ---
+        const Icon = ({ children, size = 18, className = "" }) => (
+            <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+                {children}
+            </svg>
+        );
+
+        const Save = (props) => <Icon {...props}><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></Icon>;
+        const Upload = (props) => <Icon {...props}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></Icon>;
+        const Plus = (props) => <Icon {...props}><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></Icon>;
+        const Trash2 = (props) => <Icon {...props}><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></Icon>;
+        const Settings = (props) => <Icon {...props}><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></Icon>;
+        const User = (props) => <Icon {...props}><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></Icon>;
+        const Users = (props) => <Icon {...props}><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></Icon>;
+        const ChevronRight = (props) => <Icon {...props}><polyline points="9 18 15 12 9 6"/></Icon>;
+        const ChevronLeft = (props) => <Icon {...props}><polyline points="15 18 9 12 15 6"/></Icon>;
+        const LayoutDashboard = (props) => <Icon {...props}><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></Icon>;
+        const FileText = (props) => <Icon {...props}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></Icon>;
+        const CheckCircle = (props) => <Icon {...props}><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></Icon>;
+        const BarChart2 = (props) => <Icon {...props}><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></Icon>;
+        const X = (props) => <Icon {...props}><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></Icon>;
+        const AlertCircle = (props) => <Icon {...props}><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></Icon>;
+        const LogOut = (props) => <Icon {...props}><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></Icon>;
+        const Printer = (props) => <Icon {...props}><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></Icon>;
+        const Calendar = (props) => <Icon {...props}><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></Icon>;
+        const Target = (props) => <Icon {...props}><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></Icon>;
+        const Lightbulb = (props) => <Icon {...props}><line x1="9" y1="18" x2="15" y2="18"/><line x1="10" y1="22" x2="14" y2="22"/><path d="M15.09 14c.18-.98.65-1.74 1.41-2.5A4.65 4.65 0 0 0 12 2a4.65 4.65 0 0 0-4.5 8.5c.75.75 1.23 1.51 1.41 2.5"/></Icon>;
+        const DollarSign = (props) => <Icon {...props}><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></Icon>;
+        const Briefcase = (props) => <Icon {...props}><rect x="2" y="7" width="20" height="14" rx="2" ry="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></Icon>;
+        const DownloadImage = (props) => <Icon {...props}><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></Icon>;
+        const ThumbsUp = (props) => <Icon {...props}><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"/></Icon>;
+        const MessageSquare = (props) => <Icon {...props}><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></Icon>;
+        const TrendingUp = (props) => <Icon {...props}><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></Icon>;
+        const List = (props) => <Icon {...props}><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></Icon>;
+        const CheckSquare = (props) => <Icon {...props}><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></Icon>;
+
+        // --- Constants ---
+        const CONTRIBUTION_OPTIONS = ["핵심 기여", "중간 기여", "일부 기여", "업무 지원"];
+        const OPS_STATUS_OPTIONS = ["완전 반영 (운영 중)", "부분 반영 (일부 기능)", "반영 대기 (개발 완료)", "미반영 (보류/폐기)"];
+        const SCORE_OPTIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+
+        const SALARY_LEVELS = [
+            { level: 'L1', range: '3,500 ~ 4,000만원', desc: '기본 업무 수행' },
+            { level: 'L2', range: '~ 4,500만원', desc: '독립적 과제 수행' },
+            { level: 'L3', range: '~ 5,000만원', desc: '프로젝트 리더 (PoC)' },
+            { level: 'L4', range: '~ 5,500만원', desc: '신규 발굴 · MVP 완성' },
+            { level: 'L5', range: '~ 6,000만원', desc: '복수 프로젝트 총괄' },
+        ];
+
+        // --- Helper Components ---
+        
+        const ConfirmModal = ({ isOpen, title, message, onConfirm, onCancel, type = 'danger' }) => {
+            if (!isOpen) return null;
+            return (
+                <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 print:hidden" data-html2canvas-ignore="true">
+                    <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full overflow-hidden transform transition-all scale-100 opacity-100">
+                        <div className="p-6">
+                            <div className="flex items-center gap-3 mb-4">
+                                <div className={`p-3 rounded-full ${type === 'danger' ? 'bg-red-100 text-red-600' : 'bg-blue-100 text-blue-600'}`}>
+                                    {type === 'danger' ? <AlertCircle size={24} /> : <CheckCircle size={24} />}
+                                </div>
+                                <h3 className="text-lg font-bold text-gray-900">{title}</h3>
+                            </div>
+                            <p className="text-gray-600 mb-6 leading-relaxed">{message}</p>
+                            <div className="flex gap-3">
+                                <button onClick={onCancel} className="flex-1 px-4 py-2.5 bg-gray-100 text-gray-700 font-medium rounded-xl hover:bg-gray-200 transition">
+                                    취소
+                                </button>
+                                <button onClick={onConfirm} className={`flex-1 px-4 py-2.5 text-white font-medium rounded-xl transition shadow-lg ${type === 'danger' ? 'bg-red-500 hover:bg-red-600 shadow-red-200' : 'bg-blue-600 hover:bg-blue-700 shadow-blue-200'}`}>
+                                    확인
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // Fix for HTML2Canvas text cutoff: explicit height and matching line-height
+        const InputField = ({ label, value, onChange, type = "text", placeholder = "", readOnly = false, className="" }) => (
+            <div className={`flex flex-col ${className}`}>
+                <label className="text-xs font-bold text-slate-500 mb-1.5">{label}</label>
+                <input 
+                    type={type} 
+                    value={value} 
+                    onChange={onChange} 
+                    placeholder={placeholder}
+                    readOnly={readOnly}
+                    className={`w-full border border-slate-200 rounded-lg px-3 capture-safe-input text-sm transition focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 ${readOnly ? 'bg-slate-50 text-slate-500' : 'bg-white text-slate-800'}`} 
+                />
+            </div>
+        );
+
+        const DateRangeField = ({ label, startVal, endVal, onStartChange, onEndChange, readOnly }) => (
+            <div className="flex flex-col w-full">
+                <label className="text-xs font-bold text-slate-500 mb-1.5 flex items-center gap-1">
+                    <Calendar size={12}/> {label}
+                </label>
+                <div className={`flex items-center border border-slate-200 rounded-lg px-2 h-12 bg-white focus-within:ring-2 focus-within:ring-blue-500/20 focus-within:border-blue-500 transition-all ${readOnly ? 'bg-slate-50' : 'bg-white'}`}>
+                    <input 
+                        type="date" 
+                        value={startVal} 
+                        onChange={onStartChange} 
+                        readOnly={readOnly}
+                        className="flex-1 bg-transparent border-none outline-none text-sm leading-[3rem] text-slate-800 placeholder-slate-400 p-1 min-w-[110px]" 
+                    />
+                    <span className="text-slate-400 font-bold px-2">~</span>
+                    <input 
+                        type="date" 
+                        value={endVal} 
+                        onChange={onEndChange} 
+                        readOnly={readOnly}
+                        className="flex-1 bg-transparent border-none outline-none text-sm leading-[3rem] text-slate-800 placeholder-slate-400 p-1 min-w-[110px]" 
+                    />
+                </div>
+            </div>
+        );
+
+        const SelectField = ({ label, value, onChange, options, disabled=false }) => (
+            <div className="flex flex-col">
+                <label className="text-xs font-bold text-slate-500 mb-1.5">{label}</label>
+                <div className="relative">
+                    <select 
+                        value={value} 
+                        onChange={onChange} 
+                        disabled={disabled}
+                        className="w-full appearance-none border border-slate-200 rounded-lg px-3 capture-safe-input text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 disabled:bg-slate-50 disabled:text-slate-400"
+                    >
+                        <option value="">선택하세요</option>
+                        {options.map(opt => (
+                            <option key={opt} value={opt}>{opt}</option>
+                        ))}
+                    </select>
+                    <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M6 9l6 6 6-6"/></svg>
+                    </div>
+                </div>
+            </div>
+        );
+
+        const ChartSection = ({ lData }) => {
+            const data = [
+                { subject: '속도', A: 0, B: lData ? parseInt(lData.scoreSpeed || 0) : 0, fullMark: 10 }, 
+                { subject: '품질', A: 0, B: lData ? parseInt(lData.scoreQuality || 0) : 0, fullMark: 10 },
+                { subject: '정확성', A: 0, B: lData ? parseInt(lData.scoreAccuracy || 0) : 0, fullMark: 10 },
+                { subject: '소통', A: 0, B: lData ? parseInt(lData.scoreComm || 0) : 0, fullMark: 10 },
+            ];
+
+            return (
+                <div className="bg-slate-50 rounded-xl p-4 flex flex-col items-center justify-center h-full min-h-[250px] relative print-hidden-bg">
+                    <h4 className="absolute top-4 left-4 text-xs font-bold text-slate-400 uppercase tracking-wider">Analysis</h4>
+                    <ResponsiveContainer width="100%" height={200}>
+                        <RadarChart cx="50%" cy="50%" outerRadius="70%" data={data}>
+                            <PolarGrid stroke="#e2e8f0" />
+                            <PolarAngleAxis dataKey="subject" tick={{fontSize: 11, fill: '#64748b', fontWeight: 600}} />
+                            <PolarRadiusAxis angle={30} domain={[0, 10]} tick={false} axisLine={false} />
+                            {lData && <Radar name="팀장 평가" dataKey="B" stroke="#ef4444" fill="#ef4444" fillOpacity={0.2} />}
+                            <Legend iconSize={8} wrapperStyle={{fontSize: '11px', paddingTop: '10px'}}/>
+                        </RadarChart>
+                    </ResponsiveContainer>
+                </div>
+            );
+        };
+
+        // --- Summary Table (Updated with Ops Status) ---
+        const SummaryTable = ({ projects }) => {
+            if (!projects || projects.length === 0) return null;
+
+            return (
+                <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden mb-8">
+                    <div className="px-6 py-4 border-b border-slate-100 bg-slate-50 flex items-center gap-2">
+                         <List size={18} className="text-slate-600" />
+                         <h3 className="font-bold text-slate-800">프로젝트 수행 요약</h3>
+                    </div>
+                    <div className="overflow-x-auto">
+                        <table className="min-w-full divide-y divide-slate-100 text-sm">
+                            <thead className="bg-slate-50">
+                                <tr>
+                                    <th className="px-4 py-3 text-left font-bold text-slate-500 uppercase w-1/3">프로젝트명</th>
+                                    <th className="px-4 py-3 text-left font-bold text-slate-500 uppercase">기간</th>
+                                    <th className="px-4 py-3 text-center font-bold text-slate-500 uppercase">역할</th>
+                                    <th className="px-4 py-3 text-center font-bold text-slate-500 uppercase">기여도</th>
+                                    <th className="px-4 py-3 text-center font-bold text-slate-500 uppercase">운영 반영</th>
+                                </tr>
+                            </thead>
+                            <tbody className="bg-white divide-y divide-slate-100">
+                                {projects.map((proj, idx) => (
+                                    <tr key={proj.id || idx} className="hover:bg-slate-50/50">
+                                        <td className="px-4 py-3 font-medium text-slate-800">{proj.name}</td>
+                                        <td className="px-4 py-3 text-slate-500 text-xs">
+                                            {proj.planStart} ~ {proj.isOngoing ? '진행중' : proj.actEnd}
+                                        </td>
+                                        <td className="px-4 py-3 text-center text-slate-600">{proj.role}</td>
+                                        <td className="px-4 py-3 text-center">
+                                            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-50 text-blue-700 border border-blue-100">
+                                                {proj.contribution}
+                                            </span>
+                                        </td>
+                                        <td className="px-4 py-3 text-center">
+                                            <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${proj.opsStatus && proj.opsStatus.includes('완전') ? 'bg-green-50 text-green-700 border-green-100' : 'bg-gray-50 text-gray-600 border-gray-100'} border`}>
+                                                {proj.opsStatus ? proj.opsStatus.split('(')[0] : '-'}
+                                            </span>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            );
+        };
+
+        // --- Compensation Card (Updated Logic) ---
+        const CompensationCard = ({ overallScore, setCompData, compData, isPrint }) => {
+            let grade = 'B-C';
+            let rate = 0; 
+            let color = 'text-gray-500';
+            
+            if (overallScore >= 9.0) { grade = 'S'; rate = 30; color = 'text-purple-600'; }
+            else if (overallScore >= 8.0) { grade = 'A'; rate = 20; color = 'text-green-600'; }
+
+            useEffect(() => {
+                if (compData.isIncentiveTarget) {
+                    const val = String(compData.currentSalary || '').replace(/,/g, '');
+                    if (!isNaN(val) && val !== '') {
+                        const annualSalary = parseInt(val);
+                        const monthlyBase = annualSalary / 12;
+                        const incentive = Math.floor(monthlyBase * (rate / 100));
+                        
+                        const formattedIncentive = incentive > 0 ? formatNumber(incentive) : '';
+                        if (compData.incentiveAmount !== formattedIncentive) {
+                            setCompData(prev => ({ ...prev, incentiveAmount: formattedIncentive }));
+                        }
+                    }
+                } else {
+                    if (compData.incentiveAmount !== '') {
+                        setCompData(prev => ({ ...prev, incentiveAmount: '' }));
+                    }
+                }
+            }, [compData.currentSalary, rate, setCompData, compData.isIncentiveTarget]);
+
+            const handleCurrentSalaryChange = (e) => {
+                const val = e.target.value.replace(/,/g, '');
+                if (!isNaN(val) || val === '') {
+                    setCompData(prev => ({ ...prev, currentSalary: val }));
+                }
+            };
+
+            const handleConfirmedSalaryChange = (e) => {
+                const val = e.target.value.replace(/,/g, '');
+                if (!isNaN(val) || val === '') {
+                    setCompData(prev => ({ ...prev, salaryAmount: val }));
+                }
+            };
+
+            const handleIncentiveChange = (e) => {
+                const val = e.target.value.replace(/,/g, '');
+                if (!isNaN(val) || val === '') {
+                    setCompData(prev => ({ ...prev, incentiveAmount: formatNumber(val) }));
+                }
+            };
+            
+            const handleFeedbackChange = (field, val) => {
+                setCompData(prev => ({ ...prev, [field]: val }));
+            };
+
+            const toggleIncentiveTarget = (e) => {
+                setCompData(prev => ({ ...prev, isIncentiveTarget: e.target.checked }));
+            };
+
+            const toggleSalaryTarget = (e) => {
+                setCompData(prev => ({ ...prev, isSalaryTarget: e.target.checked }));
+            };
+
+            const currentSal = parseNumber(compData.currentSalary);
+            const confirmedSal = parseNumber(compData.salaryAmount);
+            const increaseRate = currentSal > 0 ? ((confirmedSal - currentSal) / currentSal * 100).toFixed(1) : 0;
+            const increaseAmount = confirmedSal - currentSal;
+
+            const selectedLevelInfo = SALARY_LEVELS.find(l => l.level === compData.level);
+
+            return (
+                <div className="bg-white rounded-2xl shadow-lg border border-slate-200 p-6 mb-8 mt-8 print-break print-hidden-bg print:shadow-none print:border-slate-300">
+                    <div className="flex items-center gap-2 mb-6 border-b border-slate-100 pb-4">
+                        <h2 className="text-xl font-bold text-slate-800">보상 및 레벨 평가 (Compensation & Level)</h2>
+                    </div>
+
+                    <div className="flex flex-col md:flex-row gap-8 mb-8">
+                        {/* Left: Incentive Calculation */}
+                        <div className="flex-1 bg-slate-50 rounded-xl p-5 print-hidden-bg border border-slate-100">
+                            <h3 className="text-sm font-bold text-slate-500 mb-4 flex items-center gap-2 justify-between">
+                                <span className="flex items-center gap-2"><Target size={16}/> 인센티브 등급 산정</span>
+                                <label className="flex items-center gap-1 text-xs cursor-pointer text-blue-600">
+                                    <input type="checkbox" checked={compData.isIncentiveTarget || false} onChange={toggleIncentiveTarget} className="accent-blue-600" />
+                                    금번 지급 대상 분기입니까? (상/하반기)
+                                </label>
+                            </h3>
+                            
+                            <div className="flex items-center justify-between bg-white p-4 rounded-lg border border-slate-200 mb-4">
+                                <div>
+                                    <p className="text-xs text-slate-400 uppercase font-bold">Final Grade</p>
+                                    <p className={`text-3xl font-black ${color}`}>{grade} <span className="text-lg text-slate-400 font-normal">({overallScore})</span></p>
+                                </div>
+                                <div className="text-right">
+                                    <p className="text-xs text-slate-400 uppercase font-bold">Incentive Rate</p>
+                                    <p className="text-xl font-bold text-slate-800">{rate}%</p>
+                                </div>
+                            </div>
+
+                            <div className="space-y-4">
+                                <div>
+                                    <label className="text-xs font-bold text-slate-500 mb-1 block">현재 연봉 (원)</label>
+                                    <input 
+                                        type="text" 
+                                        className="w-full border border-slate-300 rounded-lg px-3 capture-safe-input text-right font-bold text-slate-600 focus:ring-2 focus:ring-indigo-500 outline-none"
+                                        placeholder="0"
+                                        value={formatNumber(compData.currentSalary)}
+                                        onChange={handleCurrentSalaryChange}
+                                    />
+                                    <p className="text-[10px] text-slate-400 mt-1 text-right">* 월 환산: {formatNumber(Math.floor(parseNumber(compData.currentSalary)/12))} 원</p>
+                                </div>
+                                <div>
+                                    <label className={`text-xs font-bold mb-1 block ${!compData.isIncentiveTarget ? 'text-gray-400' : 'text-slate-500'}`}>제안 인센티브 (원) {compData.isIncentiveTarget ? '- 자동계산' : '- 대상 아님'}</label>
+                                    <input 
+                                        type="text" 
+                                        className={`w-full border rounded-lg px-3 capture-safe-input text-right font-bold outline-none ${!compData.isIncentiveTarget ? 'bg-gray-100 text-gray-400 border-gray-200' : 'bg-blue-50 text-blue-800 border-blue-300 focus:ring-2 focus:ring-blue-500'}`}
+                                        placeholder="0"
+                                        value={compData.incentiveAmount || ''}
+                                        onChange={handleIncentiveChange}
+                                        disabled={!compData.isIncentiveTarget}
+                                    />
+                                    {compData.isIncentiveTarget && <p className="text-[10px] text-blue-400 mt-1 text-right">* 계산식: (연봉 ÷ 12) × {rate}%</p>}
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Right: Salary Level */}
+                        <div className="flex-1 bg-slate-50 rounded-xl p-5 print-hidden-bg border border-slate-100">
+                            <h3 className="text-sm font-bold text-slate-500 mb-4 flex items-center gap-2 justify-between">
+                                <span className="flex items-center gap-2"><Briefcase size={16}/> 연봉 레벨 평가</span>
+                                <label className="flex items-center gap-1 text-xs cursor-pointer text-blue-600">
+                                    <input type="checkbox" checked={compData.isSalaryTarget || false} onChange={toggleSalaryTarget} className="accent-blue-600" />
+                                    금번 협상 대상자입니까?
+                                </label>
+                            </h3>
+                            <div className="grid grid-cols-2 gap-3 mb-4">
+                                <div>
+                                    <label className="block text-xs font-bold text-slate-500 mb-1.5">현재 등급 (Current)</label>
+                                    <select 
+                                        value={compData.currentLevel || ''} 
+                                        onChange={(e) => setCompData(prev => ({ ...prev, currentLevel: e.target.value }))}
+                                        className="w-full border border-slate-300 rounded-lg px-3 capture-safe-input font-medium text-slate-800 focus:ring-2 focus:ring-indigo-500 outline-none"
+                                    >
+                                        <option value="">선택하세요</option>
+                                        {SALARY_LEVELS.map(l => (
+                                            <option key={l.level} value={l.level}>{l.level}</option>
+                                        ))}
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-bold text-slate-500 mb-1.5">확정 등급 (Confirmed)</label>
+                                    <select 
+                                        value={compData.level || ''} 
+                                        onChange={(e) => setCompData(prev => ({ ...prev, level: e.target.value }))}
+                                        className="w-full border border-slate-300 rounded-lg px-3 capture-safe-input font-medium text-slate-800 focus:ring-2 focus:ring-indigo-500 outline-none"
+                                    >
+                                        <option value="">선택하세요</option>
+                                        {SALARY_LEVELS.map(l => (
+                                            <option key={l.level} value={l.level}>{l.level} - {l.desc}</option>
+                                        ))}
+                                    </select>
+                                </div>
+                            </div>
+                            
+                            {selectedLevelInfo && (
+                                <div className="bg-blue-50 border border-blue-100 rounded-lg p-3 mb-4">
+                                    <p className="text-xs text-blue-600 font-bold mb-1">권장 연봉 구간</p>
+                                    <p className="text-lg font-bold text-blue-800">{selectedLevelInfo.range}</p>
+                                </div>
+                            )}
+
+                            <div className="space-y-4">
+                                <div>
+                                    <label className={`text-xs font-bold mb-1 block ${!compData.isSalaryTarget ? 'text-gray-400' : 'text-slate-500'}`}>제안 연봉 (원) {compData.isSalaryTarget ? '' : '- 대상 아님'}</label>
+                                    <input 
+                                        type="text" 
+                                        className={`w-full border rounded-lg px-3 capture-safe-input text-right font-bold outline-none ${!compData.isSalaryTarget ? 'bg-gray-100 text-gray-400 border-gray-200' : 'bg-white text-slate-800 border-slate-300 focus:ring-2 focus:ring-indigo-500'}`}
+                                        placeholder="0"
+                                        value={formatNumber(compData.salaryAmount)}
+                                        onChange={handleConfirmedSalaryChange}
+                                        disabled={!compData.isSalaryTarget}
+                                    />
+                                </div>
+                                <div className="flex justify-between items-center pt-2 border-t border-slate-200">
+                                    <span className="text-xs font-bold text-slate-500">인상률 (Increase)</span>
+                                    <div className="text-right">
+                                        <span className={`text-sm font-bold ${increaseAmount > 0 ? 'text-red-500' : 'text-gray-500'}`}>
+                                            {compData.isSalaryTarget && increaseRate != 0 ? `${increaseAmount > 0 ? '+' : ''}${formatNumber(increaseAmount)} (${increaseAmount > 0 ? '+' : ''}${increaseRate}%)` : '-'}
+                                        </span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Qualitative Feedback Forms */}
+                    <div className="space-y-6 border-t border-slate-100 pt-6">
+                         <div>
+                            <label className="flex items-center gap-2 text-sm font-bold text-blue-600 mb-2">
+                                <ThumbsUp size={16} /> 강점 및 긍정적 피드백 (Strength)
+                            </label>
+                            <textarea 
+                                className="w-full border border-slate-200 rounded-xl p-4 text-sm leading-normal min-h-[100px] focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 resize-none bg-slate-50"
+                                placeholder="이번 분기 동안 보여준 강점이나 잘한 점에 대해 구체적으로 기술해주세요."
+                                value={compData.strength || ''}
+                                onChange={(e) => handleFeedbackChange('strength', e.target.value)}
+                            ></textarea>
+                        </div>
+                        <div>
+                            <label className="flex items-center gap-2 text-sm font-bold text-amber-600 mb-2">
+                                <TrendingUp size={16} /> 개선 필요 포인트 (Areas for Improvement)
+                            </label>
+                            <textarea 
+                                className="w-full border border-slate-200 rounded-xl p-4 text-sm leading-normal min-h-[100px] focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 resize-none bg-slate-50"
+                                placeholder="앞으로 보완하거나 개선이 필요한 역량, 태도 등에 대해 기술해주세요."
+                                value={compData.improvements || ''}
+                                onChange={(e) => handleFeedbackChange('improvements', e.target.value)}
+                            ></textarea>
+                        </div>
+                        <div>
+                            <label className="flex items-center gap-2 text-sm font-bold text-slate-600 mb-2">
+                                <MessageSquare size={16} /> 업무 레벨에 대한 의견 (Level Opinion)
+                            </label>
+                            <textarea 
+                                className="w-full border border-slate-200 rounded-xl p-4 text-sm leading-normal min-h-[100px] focus:outline-none focus:ring-2 focus:ring-slate-500/20 focus:border-slate-500 resize-none bg-slate-50"
+                                placeholder="현재 레벨 대비 수행 수준이나 차기 레벨 진입을 위한 조언을 기술해주세요."
+                                value={compData.levelOpinion || ''}
+                                onChange={(e) => handleFeedbackChange('levelOpinion', e.target.value)}
+                            ></textarea>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const ProjectCard = ({ project, index, isLeader, onTriggerDelete, onUpdate, leaderEvalData, onUpdateLeaderEval }) => {
+            
+            return (
+                <div className="bg-white border border-slate-200 rounded-2xl p-6 mb-6 shadow-sm hover:shadow-md transition-shadow relative print-break group print-hidden-bg">
+                    
+                    <div className="flex flex-col lg:flex-row gap-8">
+                        {/* Left: Input Fields */}
+                        <div className="flex-1 space-y-6">
+                            <div className="flex items-center gap-3 border-b border-slate-100 pb-4">
+                                <div className="w-8 h-8 rounded-lg bg-blue-600 text-white flex items-center justify-center font-bold text-sm print-hidden-bg relative group/index text-white">
+                                    {index + 1}
+                                </div>
+                                <h3 className="text-lg font-bold text-slate-800 flex-1">
+                                    {isLeader ? (project.name || '프로젝트명 미입력') : '프로젝트 상세 정보'}
+                                </h3>
+                                {!isLeader && (
+                                    <button 
+                                        type="button"
+                                        onClick={(e) => { e.stopPropagation(); onTriggerDelete(index); }} 
+                                        className="no-print p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition ml-auto"
+                                        title="프로젝트 삭제"
+                                    >
+                                        <Trash2 size={20} />
+                                    </button>
+                                )}
+                            </div>
+                            
+                            <div className="grid grid-cols-1 gap-6">
+                                <InputField label="프로젝트명" value={project.name} onChange={(e) => onUpdate(index, 'name', e.target.value)} readOnly={isLeader} placeholder="예: 1분기 마케팅 캠페인 기획" />
+                                
+                                <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+                                    <DateRangeField 
+                                        label="계획 기간" 
+                                        startVal={project.planStart} endVal={project.planEnd} 
+                                        onStartChange={(e) => onUpdate(index, 'planStart', e.target.value)}
+                                        onEndChange={(e) => onUpdate(index, 'planEnd', e.target.value)}
+                                        readOnly={isLeader}
+                                    />
+                                    <div className="flex flex-col relative">
+                                        <DateRangeField 
+                                            label="실제 수행 기간" 
+                                            startVal={project.actStart} endVal={project.isOngoing ? '' : project.actEnd} 
+                                            onStartChange={(e) => onUpdate(index, 'actStart', e.target.value)}
+                                            onEndChange={(e) => onUpdate(index, 'actEnd', e.target.value)}
+                                            readOnly={isLeader || project.isOngoing}
+                                        />
+                                        {!isLeader && (
+                                            <label className="absolute -bottom-6 right-0 flex items-center gap-1.5 cursor-pointer group/chk no-print">
+                                                <input type="checkbox" checked={project.isOngoing} onChange={(e) => onUpdate(index, 'isOngoing', e.target.checked)} className="accent-blue-600 w-4 h-4" />
+                                                <span className="text-xs font-medium text-slate-500 group-hover/chk:text-blue-600 transition">현재 진행 중</span>
+                                            </label>
+                                        )}
+                                        {isLeader && project.isOngoing && (
+                                            <span className="absolute top-0 right-0 px-2 py-0.5 bg-green-100 text-green-700 text-[10px] font-bold rounded uppercase tracking-wide">Ongoing</span>
+                                        )}
+                                    </div>
+                                </div>
+                                
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                    <InputField label="담당 역할" value={project.role} onChange={(e) => onUpdate(index, 'role', e.target.value)} readOnly={isLeader} placeholder="PM, 개발, 디자인 등" />
+                                    <InputField label="핵심 성과(KPI)" value={project.kpi} onChange={(e) => onUpdate(index, 'kpi', e.target.value)} readOnly={isLeader} placeholder="예: 전환율 5% 달성" />
+                                </div>
+
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                    <SelectField label="기여도" value={project.contribution} onChange={(e) => onUpdate(index, 'contribution', e.target.value)} options={CONTRIBUTION_OPTIONS} disabled={isLeader} />
+                                    <SelectField label="운영 반영 여부" value={project.opsStatus} onChange={(e) => onUpdate(index, 'opsStatus', e.target.value)} options={OPS_STATUS_OPTIONS} disabled={isLeader} />
+                                </div>
+                            </div>
+                            
+                            <div className="pt-2">
+                                <label className="text-xs font-bold text-slate-500 mb-1.5 block">비고 / 특이사항</label>
+                                <textarea 
+                                    value={project.notes} 
+                                    onChange={(e) => onUpdate(index, 'notes', e.target.value)} 
+                                    readOnly={isLeader}
+                                    className={`w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm leading-normal min-h-[80px] focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 resize-none ${isLeader ? 'bg-slate-50 text-slate-500' : 'bg-white'}`}
+                                    placeholder="프로젝트 수행 중 특이사항이나 어려웠던 점 등을 자유롭게 기술하세요."
+                                ></textarea>
+                            </div>
+                        </div>
+
+                        {/* Right: Leader Evaluation Only */}
+                        {isLeader && (
+                        <div className="w-full lg:w-[340px] flex flex-col gap-6">
+                            <div className="bg-white border border-slate-100 rounded-xl p-5 shadow-sm print-hidden-bg">
+                                <h4 className="text-sm font-bold text-slate-800 mb-4 flex items-center gap-2">
+                                    <div className="w-1.5 h-4 bg-red-500 rounded-full"></div>
+                                    팀장 평가
+                                </h4>
+                                <div className="grid grid-cols-2 gap-3">
+                                    <SelectField label="속도 (Speed)" value={leaderEvalData?.scoreSpeed || ''} onChange={(e) => onUpdateLeaderEval(index, 'scoreSpeed', e.target.value)} options={SCORE_OPTIONS} />
+                                    <SelectField label="품질 (Quality)" value={leaderEvalData?.scoreQuality || ''} onChange={(e) => onUpdateLeaderEval(index, 'scoreQuality', e.target.value)} options={SCORE_OPTIONS} />
+                                    <SelectField label="소통 (Comm)" value={leaderEvalData?.scoreComm || ''} onChange={(e) => onUpdateLeaderEval(index, 'scoreComm', e.target.value)} options={SCORE_OPTIONS} />
+                                    <SelectField label="정확성 (Accuracy)" value={leaderEvalData?.scoreAccuracy || ''} onChange={(e) => onUpdateLeaderEval(index, 'scoreAccuracy', e.target.value)} options={SCORE_OPTIONS} />
+                                </div>
+                                <div className="mt-3">
+                                     <label className="text-xs font-bold text-slate-500 mb-1.5 block">팀장 코멘트</label>
+                                     <textarea 
+                                        className="w-full h-[60px] border border-slate-200 rounded-lg p-3 text-xs leading-normal focus:outline-none focus:ring-2 focus:ring-slate-500/20 focus:border-slate-500 resize-none bg-white"
+                                        placeholder="평가 사유"
+                                        value={leaderEvalData?.notes}
+                                        onChange={(e) => onUpdateLeaderEval(index, 'notes', e.target.value)}
+                                     ></textarea>
+                                </div>
+                            </div>
+                             <ChartSection pData={project} lData={leaderEvalData} />
+                        </div>
+                        )}
+                    </div>
+                </div>
+            );
+        };
+
+        // --- New Sections for Next Quarter & Improvements ---
+        const AdditionalInfoSection = ({ data, onChange, isLeader }) => (
+            <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-6 print-break">
+                <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm print-hidden-bg">
+                    <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
+                        <Target size={20} className="text-blue-600"/>
+                        차기 분기 업무 목표
+                    </h3>
+                    <textarea 
+                        value={data.nextGoals || ''} 
+                        onChange={(e) => onChange('nextGoals', e.target.value)}
+                        readOnly={isLeader}
+                        className={`w-full border border-slate-200 rounded-xl p-4 text-sm leading-normal min-h-[150px] focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 resize-none leading-relaxed ${isLeader ? 'bg-slate-50 text-slate-600' : 'bg-white'}`}
+                        placeholder="다음 분기에 달성하고자 하는 주요 목표와 계획을 서술하세요."
+                    />
+                </div>
+                <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm print-hidden-bg">
+                    <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
+                        <Lightbulb size={20} className="text-amber-500"/>
+                        업무 프로세스 개선 제안
+                    </h3>
+                    <textarea 
+                        value={data.improvements || ''} 
+                        onChange={(e) => onChange('improvements', e.target.value)}
+                        readOnly={isLeader}
+                        className={`w-full border border-slate-200 rounded-xl p-4 text-sm leading-normal min-h-[150px] focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 resize-none leading-relaxed ${isLeader ? 'bg-slate-50 text-slate-600' : 'bg-white'}`}
+                        placeholder="업무 효율성 증대 및 팀 성장을 위한 개선 아이디어를 자유롭게 제안하세요."
+                    />
+                </div>
+            </div>
+        );
+
+        // --- Main Application ---
+        function App() {
+            const [mode, setMode] = useState('landing'); 
+            const [password, setPassword] = useState('');
+            
+            // Employee Data State
+            const [employeeData, setEmployeeData] = useState({
+                name: '',
+                empId: '',
+                dept: '',
+                responsibilities: '', 
+                projects: [],
+                nextGoals: '',
+                improvements: ''
+            });
+
+            // Leader State
+            const [importedData, setImportedData] = useState(null); 
+            const [leaderEval, setLeaderEval] = useState({}); 
+            const [compData, setCompData] = useState({ 
+                level: '', 
+                currentLevel: '', 
+                incentiveAmount: '', 
+                salaryAmount: '', 
+                currentSalary: '',
+                strength: '',        
+                improvements: '',    
+                levelOpinion: '',
+                isIncentiveTarget: false,
+                isSalaryTarget: false
+            });
+
+            // Modal State
+            const [modal, setModal] = useState({ isOpen: false, title: '', message: '', type: 'danger', action: null });
+
+            // Grading System State
+            const [gradingScale, setGradingScale] = useState([
+                { grade: 'S', min: 9.5 },
+                { grade: 'A', min: 8.5 },
+                { grade: 'B', min: 7.5 },
+                { grade: 'C', min: 6.0 },
+                { grade: 'D', min: 0 }
+            ]);
+            
+            // Period State
+            const [period, setPeriod] = useState({ year: '', quarter: '' });
+
+            useEffect(() => {
+                const saved = localStorage.getItem('my_eval_draft_v3');
+                if (saved) {
+                    try {
+                        const loadedData = JSON.parse(saved);
+                        setEmployeeData(loadedData);
+                        if (loadedData.period) {
+                            setPeriod(loadedData.period);
+                        } else {
+                            setPeriod(getAutoReviewPeriod());
+                        }
+                    } catch(e) {
+                        setPeriod(getAutoReviewPeriod());
+                    }
+                } else {
+                    setPeriod(getAutoReviewPeriod());
+                }
+            }, []);
+
+            useEffect(() => {
+                if (mode === 'employee') {
+                    localStorage.setItem('my_eval_draft_v3', JSON.stringify({ ...employeeData, period }));
+                }
+            }, [employeeData, mode, period]);
+
+            // --- Handlers ---
+            const closeModal = () => setModal({ ...modal, isOpen: false });
+
+            const handleLogin = () => {
+                if (password === '6991') { 
+                    setMode('leader');
+                } else {
+                    setModal({
+                        isOpen: true,
+                        title: '로그인 실패',
+                        message: '비밀번호가 일치하지 않습니다. 다시 시도해주세요.',
+                        type: 'danger',
+                        action: closeModal
+                    });
+                }
+            };
+
+            const addNewProject = () => {
+                setEmployeeData(prev => ({
+                    ...prev,
+                    projects: [...prev.projects, {
+                        id: Date.now(),
+                        name: '',
+                        planStart: '', planEnd: '',
+                        actStart: '', actEnd: '', isOngoing: false,
+                        role: '',
+                        contribution: '',
+                        opsStatus: '',
+                        kpi: '',
+                        scoreSpeed: '', 
+                        scoreQuality: '',
+                        scoreComm: '',
+                        scoreAccuracy: '',
+                        notes: ''
+                    }]
+                }));
+                setTimeout(() => window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' }), 100);
+            };
+
+            const confirmRemoveProject = (index) => {
+                setModal({
+                    isOpen: true,
+                    title: '프로젝트 삭제',
+                    message: '이 프로젝트를 정말 삭제하시겠습니까? 삭제된 데이터는 복구할 수 없습니다.',
+                    type: 'danger',
+                    action: () => {
+                        const newProjects = [...employeeData.projects];
+                        newProjects.splice(index, 1);
+                        setEmployeeData({...employeeData, projects: newProjects});
+                        closeModal();
+                    }
+                });
+            };
+
+            const updateProject = (index, field, value) => {
+                const newProjects = [...employeeData.projects];
+                newProjects[index][field] = value;
+                setEmployeeData({...employeeData, projects: newProjects});
+            };
+
+            const updateAdditionalInfo = (field, value) => {
+                setEmployeeData(prev => ({ ...prev, [field]: value }));
+            };
+
+            const downloadJSON = (data, filename) => {
+                if(!data.name) { 
+                    setModal({ isOpen: true, title: '필수 정보 누락', message: '이름을 먼저 입력해주세요.', type: 'danger', action: closeModal });
+                    return; 
+                }
+                // Auto-generate filename based on name and period
+                const periodStr = data.period ? `${data.period.year}${data.period.quarter}` : '';
+                const now = new Date();
+                const dateStr = now.toISOString().slice(0,10).replace(/-/g, "");
+                const timeStr = now.toTimeString().slice(0,5).replace(":", "");
+                
+                const finalFilename = filename || `${periodStr}_${dateStr}${timeStr}_${data.name}_프로젝트 리뷰.json`;
+                
+                const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(data));
+                const downloadAnchorNode = document.createElement('a');
+                downloadAnchorNode.setAttribute("href", dataStr);
+                downloadAnchorNode.setAttribute("download", finalFilename);
+                document.body.appendChild(downloadAnchorNode);
+                downloadAnchorNode.click();
+                downloadAnchorNode.remove();
+            };
+
+            const downloadLeaderJPG = () => {
+                const element = document.getElementById('leader-content-area');
+                if (!element) return;
+                html2canvas(element, { 
+                    scale: 2, 
+                    useCORS: true, 
+                    allowTaint: true,
+                    backgroundColor: '#f8fafc',
+                    ignoreElements: (element) => element.classList.contains('no-print') || element.hasAttribute('data-html2canvas-ignore')
+                }).then(canvas => {
+                    const link = document.createElement('a');
+                    link.download = `Leader_Review_${importedData.name}.jpg`;
+                    link.href = canvas.toDataURL();
+                    link.click();
+                });
+            };
+
+            const handleEmployeeFileUpload = (e) => {
+                const fileReader = new FileReader();
+                if (!e.target.files[0]) return;
+                fileReader.readAsText(e.target.files[0], "UTF-8");
+                fileReader.onload = e => {
+                    try {
+                        const parsed = JSON.parse(e.target.result);
+                        setEmployeeData(parsed);
+                        if (parsed.period) setPeriod(parsed.period); 
+                        setModal({ isOpen: true, title: '불러오기 완료', message: '평가 데이터를 성공적으로 불러왔습니다.', type: 'success', action: closeModal });
+                    } catch(err) {
+                        setModal({ isOpen: true, title: '오류', message: '잘못된 파일 형식입니다.', type: 'danger', action: closeModal });
+                    }
+                };
+            };
+
+            // Leader Handlers
+            const handleLeaderFileUpload = (e) => {
+                const fileReader = new FileReader();
+                if (!e.target.files[0]) return;
+                fileReader.readAsText(e.target.files[0], "UTF-8");
+                fileReader.onload = e => {
+                    try {
+                        const parsed = JSON.parse(e.target.result);
+                        setImportedData(parsed);
+                        if (parsed.period) setPeriod(parsed.period); 
+                        
+                        // Check if file has saved leader evaluations
+                        if (parsed.leaderEvaluations) {
+                            setLeaderEval(parsed.leaderEvaluations);
+                        } else {
+                            // Initialize fresh evaluations
+                            const initEval = {};
+                            parsed.projects.forEach((p, idx) => {
+                                initEval[idx] = {
+                                    scoreSpeed: '', scoreQuality: '', scoreComm: '', scoreAccuracy: '', notes: ''
+                                };
+                            });
+                            setLeaderEval(initEval);
+                        }
+                        if (parsed.compData) setCompData(parsed.compData);
+                    } catch(err) {
+                        alert("파일 오류");
+                    }
+                };
+            };
+
+            const updateLeaderEval = (pIndex, field, value) => {
+                setLeaderEval(prev => ({
+                    ...prev,
+                    [pIndex]: {
+                        ...prev[pIndex],
+                        [field]: value
+                    }
+                }));
+            };
+
+            const confirmLeaderComplete = () => {
+                setModal({
+                    isOpen: true,
+                    title: '평가 완료 및 저장',
+                    message: '평가를 완료하고 대시보드로 이동합니다. 평가 데이터는 자동으로 JSON 파일로 다운로드됩니다.',
+                    type: 'success',
+                    action: () => {
+                        const exportData = {
+                            ...importedData,
+                            leaderEvaluations: leaderEval,
+                            compData: compData, 
+                            period: importedData.period || period,
+                            isLeaderReviewed: true
+                        };
+                        
+                        const periodStr = exportData.period ? `${exportData.period.year}${exportData.period.quarter}` : '';
+                        const now = new Date();
+                        const dateStr = now.toISOString().slice(0,10).replace(/-/g, "");
+                        const timeStr = now.toTimeString().slice(0,5).replace(":", "");
+                        const filename = `${periodStr}_${dateStr}${timeStr}_${importedData.name}_팀장 평가 데이터.json`;
+
+                        downloadJSON(exportData, filename);
+                        
+                        closeModal();
+                        setMode('leader-dashboard');
+                    }
+                });
+            };
+
+            const getGrade = (score) => {
+                const numScore = Number(score);
+                for (let rule of gradingScale) {
+                    if (numScore >= rule.min) return rule.grade;
+                }
+                return 'F';
+            };
+
+            const calculateAverage = (p) => {
+                if (!p) return 0;
+                const sum = Number(p.scoreSpeed || 0) + Number(p.scoreQuality || 0) + Number(p.scoreComm || 0) + Number(p.scoreAccuracy || 0);
+                if (sum === 0) return 0; 
+                return (sum / 4).toFixed(1);
+            };
+
+            const calculateIncentiveScore = (projects, leaderEvals) => {
+                if (!projects || projects.length === 0) return 0;
+                
+                let totalSpeed = 0;
+                let totalQuality = 0;
+                let validCount = 0;
+                
+                projects.forEach((p, idx) => {
+                    const evalData = leaderEvals[idx];
+                    if (evalData) {
+                        const s = Number(evalData.scoreSpeed || 0);
+                        const q = Number(evalData.scoreQuality || 0);
+                        if (s > 0 || q > 0) {
+                            totalSpeed += s;
+                            totalQuality += q;
+                            validCount++;
+                        }
+                    }
+                });
+
+                if (validCount === 0) return 0;
+
+                const avgSpeed = totalSpeed / validCount;
+                const avgQuality = totalQuality / validCount;
+
+                // Formula: (Speed * 0.6) + (Quality * 0.4)
+                return ((avgSpeed * 0.6) + (avgQuality * 0.4)).toFixed(2);
+            };
+
+            // --- UI Pages ---
+
+            // 1. Landing Page
+            if (mode === 'landing') {
+                return (
+                    <div className="min-h-screen flex items-center justify-center bg-slate-100 p-6">
+                        <div className="max-w-4xl w-full">
+                            <div className="text-center mb-10">
+                                <h1 className="text-3xl font-extrabold text-slate-800 mb-2">성과 관리 시스템 Pro V6.0</h1>
+                                <p className="text-slate-500">직원 자가 평가 및 팀장 성과 리뷰를 위한 전문 플랫폼</p>
+                            </div>
+                            
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                {/* Employee Card */}
+                                <button 
+                                    onClick={() => setMode('employee')}
+                                    className="bg-white p-8 rounded-3xl shadow-lg border border-transparent hover:border-blue-500 hover:shadow-2xl transition-all group text-left relative overflow-hidden"
+                                >
+                                    <div className="absolute top-0 right-0 w-32 h-32 bg-blue-50 rounded-bl-[100px] -mr-8 -mt-8 transition-transform group-hover:scale-110"></div>
+                                    <div className="relative z-10">
+                                        <div className="w-14 h-14 bg-blue-100 text-blue-600 rounded-2xl flex items-center justify-center mb-6 shadow-sm group-hover:bg-blue-600 group-hover:text-white transition-colors">
+                                            <User size={28} />
+                                        </div>
+                                        <h2 className="text-2xl font-bold text-slate-800 mb-2">직원용</h2>
+                                        <p className="text-slate-500 mb-6">자가 평가를 작성하고<br/>프로젝트 성과를 기록합니다.</p>
+                                        <span className="inline-flex items-center text-blue-600 font-semibold group-hover:translate-x-1 transition-transform">
+                                            프로젝트 셀프 리뷰 <ChevronRight size={18} />
+                                        </span>
+                                    </div>
+                                </button>
+
+                                {/* Leader Card */}
+                                <button 
+                                    onClick={() => setMode('leader-login')}
+                                    className="bg-slate-800 p-8 rounded-3xl shadow-lg border border-transparent hover:shadow-2xl transition-all group text-left relative overflow-hidden"
+                                >
+                                    <div className="absolute top-0 right-0 w-32 h-32 bg-slate-700 rounded-bl-[100px] -mr-8 -mt-8 transition-transform group-hover:scale-110"></div>
+                                    <div className="relative z-10">
+                                        <div className="w-14 h-14 bg-slate-700 text-slate-300 rounded-2xl flex items-center justify-center mb-6 shadow-sm group-hover:bg-white group-hover:text-slate-800 transition-colors">
+                                            <Users size={28} />
+                                        </div>
+                                        <h2 className="text-2xl font-bold text-white mb-2">팀장용</h2>
+                                        <p className="text-slate-400 mb-6">직원 평가 데이터를 취합하고<br/>최종 성과 등급을 산정합니다.</p>
+                                        <span className="inline-flex items-center text-white font-semibold group-hover:translate-x-1 transition-transform">
+                                            로그인 하기 <ChevronRight size={18} />
+                                        </span>
+                                    </div>
+                                </button>
+                            </div>
+                        </div>
+                        <ConfirmModal isOpen={modal.isOpen} title={modal.title} message={modal.message} type={modal.type} onConfirm={modal.action} onCancel={closeModal} />
+                    </div>
+                );
+            }
+
+            // 2. Leader Login
+            if (mode === 'leader-login') {
+                return (
+                    <div className="min-h-screen flex items-center justify-center bg-slate-100 p-4">
+                        <div className="bg-white p-8 rounded-3xl shadow-xl max-w-sm w-full text-center">
+                            <div className="w-12 h-12 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-4 text-slate-600">
+                                <LayoutDashboard size={20} />
+                            </div>
+                            <h2 className="text-xl font-bold mb-6 text-slate-800">관리자 접근</h2>
+                            <input 
+                                type="password" 
+                                className="w-full bg-slate-50 border border-slate-200 p-3 rounded-xl mb-4 text-center text-lg focus:outline-none focus:ring-2 focus:ring-slate-800"
+                                value={password}
+                                onChange={(e) => setPassword(e.target.value)}
+                                onKeyPress={(e) => e.key === 'Enter' && handleLogin()}
+                                autoFocus
+                            />
+                            <div className="flex gap-2">
+                                <button onClick={() => setMode('landing')} className="flex-1 py-3 bg-white border border-slate-200 text-slate-600 rounded-xl font-medium hover:bg-slate-50 transition">취소</button>
+                                <button onClick={handleLogin} className="flex-1 py-3 bg-slate-800 text-white rounded-xl font-bold hover:bg-slate-900 transition shadow-lg">확인</button>
+                            </div>
+                        </div>
+                        <ConfirmModal isOpen={modal.isOpen} title={modal.title} message={modal.message} type={modal.type} onConfirm={modal.action} onCancel={closeModal} />
+                    </div>
+                );
+            }
+
+            // 3. Employee View
+            if (mode === 'employee') {
+                const autoPeriod = getAutoReviewPeriod();
+                return (
+                    <div className="min-h-screen bg-slate-50 pb-32">
+                        {/* Improved Top Navigation */}
+                        <div className="bg-white border-b border-slate-200 sticky top-0 z-40 shadow-sm/50 backdrop-blur-md bg-white/90 no-print">
+                            <div className="max-w-5xl mx-auto px-4 h-16 flex items-center justify-between">
+                                <button onClick={() => setMode('landing')} className="flex items-center gap-2 text-slate-500 hover:text-slate-800 transition font-medium">
+                                    <div className="w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center">
+                                        <ChevronRight className="rotate-180" size={18}/>
+                                    </div>
+                                    <span className="hidden sm:inline">프로젝트 셀프 리뷰</span>
+                                </button>
+                                
+                                <div className="flex items-center gap-4">
+                                    <div className="flex items-center p-1 bg-slate-100 rounded-lg">
+                                        <label className="flex items-center gap-1.5 px-3 py-1.5 rounded-md hover:bg-white hover:shadow-sm cursor-pointer transition text-xs font-semibold text-slate-600">
+                                            <Upload size={14} />
+                                            <span>불러오기</span>
+                                            <input type="file" accept=".json" onChange={handleEmployeeFileUpload} className="hidden" />
+                                        </label>
+                                        <div className="w-px h-4 bg-slate-300 mx-1"></div>
+                                        <button onClick={() => downloadJSON(employeeData)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-md hover:bg-white hover:shadow-sm transition text-xs font-semibold text-slate-600">
+                                            <Save size={14} />
+                                            <span>저장하기</span>
+                                        </button>
+                                    </div>
+
+                                    <button 
+                                        onClick={addNewProject} 
+                                        className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition shadow-lg shadow-blue-500/20 text-sm font-bold"
+                                    >
+                                        <Plus size={16} />
+                                        <span className="hidden sm:inline">새 프로젝트</span>
+                                        <span className="sm:hidden">추가</span>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="max-w-5xl mx-auto px-6 mt-8">
+                             {/* Review Period Display */}
+                             <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm mb-6 flex items-center justify-between">
+                                <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                                    <Calendar size={20} className="text-slate-600"/>
+                                    평가 대상 기간
+                                </h2>
+                                <div className="text-slate-600 font-bold text-lg">
+                                    {autoPeriod.year}년 {autoPeriod.quarter}
+                                </div>
+                            </div>
+
+                            {/* Personal Info */}
+                            <div className="bg-white rounded-2xl p-8 border border-slate-200 shadow-sm mb-8">
+                                <h2 className="text-lg font-bold text-slate-800 mb-6 flex items-center gap-2">
+                                    <User size={20} className="text-blue-600"/>
+                                    기본 인적 사항
+                                </h2>
+                                <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+                                    <InputField label="성명" value={employeeData.name} onChange={(e) => setEmployeeData({...employeeData, name: e.target.value})} placeholder="" />
+                                    <InputField label="사번" value={employeeData.empId} onChange={(e) => setEmployeeData({...employeeData, empId: e.target.value})} placeholder="ca0000" />
+                                    <InputField label="소속 부서" value={employeeData.dept} onChange={(e) => setEmployeeData({...employeeData, dept: e.target.value})} placeholder="" />
+                                    <InputField label="담당 업무" value={employeeData.responsibilities} onChange={(e) => setEmployeeData({...employeeData, responsibilities: e.target.value})} placeholder="" />
+                                </div>
+                            </div>
+
+                            {/* Projects List */}
+                            {employeeData.projects.length === 0 ? (
+                                <div className="text-center py-24 bg-white rounded-2xl border-2 border-dashed border-slate-200">
+                                    <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-4 text-slate-300">
+                                        <FileText size={32} />
+                                    </div>
+                                    <h3 className="text-lg font-bold text-slate-700 mb-2">등록된 프로젝트가 없습니다</h3>
+                                    <p className="text-slate-400 mb-6 text-sm">이번 분기에 진행한 프로젝트를 추가하여 성과를 기록해보세요.</p>
+                                    <button onClick={addNewProject} className="px-6 py-2.5 bg-blue-50 text-blue-600 font-bold rounded-xl hover:bg-blue-100 transition">
+                                        + 첫 프로젝트 추가하기
+                                    </button>
+                                </div>
+                            ) : (
+                                <div>
+                                    <h2 className="text-lg font-bold text-slate-800 mb-4 px-2">
+                                        프로젝트 목록 <span className="text-blue-600 ml-1">{employeeData.projects.length}</span>
+                                    </h2>
+                                    {employeeData.projects.map((proj, idx) => (
+                                        <ProjectCard 
+                                            key={proj.id} 
+                                            project={proj} 
+                                            index={idx} 
+                                            isLeader={false}
+                                            onTriggerDelete={confirmRemoveProject}
+                                            onUpdate={updateProject}
+                                        />
+                                    ))}
+                                    
+                                    <AdditionalInfoSection 
+                                        data={employeeData} 
+                                        onChange={updateAdditionalInfo} 
+                                        isLeader={false} 
+                                    />
+                                </div>
+                            )}
+                        </div>
+                        <ConfirmModal isOpen={modal.isOpen} title={modal.title} message={modal.message} type={modal.type} onConfirm={modal.action} onCancel={closeModal} />
+                    </div>
+                );
+            }
+
+            // 4. Leader View (Review Mode)
+            if (mode === 'leader') {
+                return (
+                    <div className="min-h-screen bg-slate-50">
+                        {/* Leader Header */}
+                        <div className="bg-slate-900 text-white sticky top-0 z-40 shadow-xl no-print">
+                            <div className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
+                                <div className="flex items-center gap-4">
+                                    <button onClick={() => setMode('landing')} className="p-2 hover:bg-white/10 rounded-lg transition">
+                                        <LogOut size={20} />
+                                    </button>
+                                    <h1 className="text-lg font-bold">팀장 평가 모드</h1>
+                                    {importedData && importedData.period && (
+                                        <span className="text-sm font-medium bg-slate-800 px-3 py-1 rounded-full border border-slate-700">
+                                            {importedData.period.year}년 {importedData.period.quarter}
+                                        </span>
+                                    )}
+                                </div>
+                                <div className="flex items-center gap-3">
+                                    <button onClick={downloadLeaderJPG} className="flex items-center gap-2 px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg transition text-sm font-bold shadow-lg">
+                                        <DownloadImage size={16} />
+                                        <span>이미지 저장 (JPG)</span>
+                                    </button>
+                                    <label className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg cursor-pointer transition text-sm font-bold shadow-lg shadow-blue-900/50">
+                                        <Upload size={16} />
+                                        <span>직원 데이터 파일 열기 (.json)</span>
+                                        <input type="file" accept=".json" onChange={handleLeaderFileUpload} className="hidden" />
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div id="leader-content-area" className="max-w-6xl mx-auto px-6 py-10 pb-32 bg-slate-50">
+                            {!importedData ? (
+                                <div className="text-center py-32 bg-white rounded-3xl border border-slate-200 shadow-sm">
+                                    <div className="w-20 h-20 bg-blue-50 text-blue-500 rounded-3xl flex items-center justify-center mx-auto mb-6">
+                                        <Upload size={40} />
+                                    </div>
+                                    <h2 className="text-2xl font-bold text-slate-800 mb-3">평가 데이터 파일이 필요합니다</h2>
+                                    <p className="text-slate-500 max-w-md mx-auto">상단 우측의 <strong className="text-blue-600">열기 버튼</strong>을 눌러 직원이 제출한 JSON 파일을 업로드해주세요.</p>
+                                </div>
+                            ) : (
+                                <div className="animate-fade-in">
+                                    <div className="bg-white border-l-4 border-blue-600 rounded-xl shadow-sm p-6 mb-8 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                                        <div>
+                                            <div className="flex items-center gap-2 mb-1">
+                                                <span className="px-2 py-0.5 bg-slate-100 text-slate-600 text-[10px] font-bold uppercase tracking-wider rounded">Employee</span>
+                                            </div>
+                                            <h2 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
+                                                {importedData.name} 
+                                                <span className="text-lg font-normal text-slate-400">|</span>
+                                                <span className="text-base font-medium text-slate-500">
+                                                    {importedData.dept} / {importedData.empId} 
+                                                    {importedData.responsibilities && ` / ${importedData.responsibilities}`}
+                                                </span>
+                                            </h2>
+                                        </div>
+                                        <div className="flex gap-8 border-t md:border-t-0 md:border-l border-slate-100 pt-4 md:pt-0 md:pl-8">
+                                            <div>
+                                                <p className="text-xs text-slate-400 uppercase font-bold mb-1">Total Projects</p>
+                                                <p className="text-2xl font-bold text-slate-800">{importedData.projects.length}</p>
+                                            </div>
+                                            <div>
+                                                <p className="text-xs text-slate-400 uppercase font-bold mb-1">Status</p>
+                                                <p className="text-2xl font-bold text-blue-600">Reviewing</p>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* Summary Table */}
+                                    <SummaryTable projects={importedData.projects} />
+                                    
+                                    {/* Project List */}
+                                    {importedData.projects.map((proj, idx) => (
+                                        <ProjectCard 
+                                            key={proj.id} 
+                                            project={proj} 
+                                            index={idx} 
+                                            isLeader={true} 
+                                            leaderEvalData={leaderEval[idx]}
+                                            onUpdateLeaderEval={updateLeaderEval}
+                                        />
+                                    ))}
+
+                                    {/* Additional Info (Next Goals) - Moved below Project List */}
+                                    <AdditionalInfoSection 
+                                        data={importedData} 
+                                        onChange={() => {}} 
+                                        isLeader={true} 
+                                    />
+
+                                    {/* Compensation Review (Now at the bottom in Leader Mode too) */}
+                                    <CompensationCard 
+                                        overallScore={calculateIncentiveScore(importedData.projects, leaderEval)} 
+                                        setCompData={setCompData}
+                                        compData={compData}
+                                        isPrint={false}
+                                    />
+                                    
+                                    <div className="mt-12 text-center no-print sticky bottom-8" data-html2canvas-ignore="true">
+                                        <button 
+                                            onClick={confirmLeaderComplete} 
+                                            className="px-8 py-4 bg-slate-800 text-white text-lg font-bold rounded-2xl shadow-xl hover:bg-slate-900 hover:scale-105 transition transform flex items-center gap-3 mx-auto"
+                                        >
+                                            <CheckCircle size={24} />
+                                            평가 완료 및 대시보드 보기
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                        <ConfirmModal isOpen={modal.isOpen} title={modal.title} message={modal.message} type={modal.type} onConfirm={modal.action} onCancel={closeModal} />
+                    </div>
+                );
+            }
+
+            // 5. Dashboard View
+            if (mode === 'leader-dashboard') {
+                if (!importedData) return null;
+
+                const incentiveScore = calculateIncentiveScore(importedData.projects, leaderEval);
+                const finalGrade = getGrade(incentiveScore);
+
+                const currentSal = parseNumber(compData.currentSalary);
+                const confirmedSal = parseNumber(compData.salaryAmount);
+                const increaseRate = currentSal > 0 ? ((confirmedSal - currentSal) / currentSal * 100).toFixed(1) : 0;
+                const increaseAmount = confirmedSal - currentSal;
+
+                // Summary data for table
+                const summaryData = importedData.projects.map((proj, idx) => {
+                    const lScore = leaderEval[idx] ? Number(calculateAverage(leaderEval[idx])) : 0;
+                    return {
+                        name: proj.name,
+                        role: proj.role,
+                        contribution: proj.contribution,
+                        ops: proj.opsStatus,
+                        kpi: proj.kpi,
+                        leaderAvg: lScore.toFixed(1),
+                        grade: getGrade(lScore)
+                    };
+                });
+
+
+                return (
+                    <div className="min-h-screen bg-slate-100 p-8 print:bg-white print:p-0">
+                         <div className="max-w-7xl mx-auto print:max-w-full">
+                            <div className="flex justify-between items-center mb-8 no-print">
+                                <div className="flex items-center gap-4">
+                                    <button onClick={() => setMode('leader')} className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg text-sm font-medium text-slate-600 transition">
+                                        <ChevronLeft size={16}/> 수정 화면으로
+                                    </button>
+                                    <h1 className="text-2xl font-bold text-slate-800">성과 및 보상 제안 리포트</h1>
+                                </div>
+                                <div className="flex gap-3">
+                                    <button onClick={() => window.print()} className="px-4 py-2 bg-slate-800 text-white rounded-lg text-sm font-medium hover:bg-slate-900 transition flex items-center gap-2 shadow-lg">
+                                        <Printer size={16}/> 리포트 출력 (PDF)
+                                    </button>
+                                </div>
+                            </div>
+
+                            {/* Report Header (Print Only) */}
+                            <div className="hidden print:block mb-8 border-b-2 border-slate-800 pb-4">
+                                <div className="flex justify-between items-end">
+                                    <div>
+                                        <h1 className="text-3xl font-extrabold text-slate-900 mb-2">성과 및 보상 제안 리포트</h1>
+                                        <p className="text-slate-500 text-sm">Performance & Compensation Proposal Report - {importedData.period ? `${importedData.period.year} ${importedData.period.quarter}` : ''}</p>
+                                    </div>
+                                    <div className="text-right">
+                                        <p className="text-slate-600 font-medium">작성 일자: {new Date().toLocaleDateString()}</p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* 1. Score Card (Updated) */}
+                            <div className="bg-white rounded-2xl shadow-lg p-8 mb-8 flex flex-col md:flex-row justify-between items-center relative overflow-hidden print-hidden-bg print:shadow-none print:border print:border-slate-300">
+                                <div className="absolute top-0 left-0 w-2 h-full bg-blue-600"></div>
+                                <div>
+                                    <div className="flex items-center gap-4 mb-2">
+                                        <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center text-slate-600 print-hidden-bg">
+                                            <User size={32} />
+                                        </div>
+                                        <div>
+                                            <h2 className="text-3xl font-bold text-slate-900">{importedData.name}</h2>
+                                            <p className="text-slate-500 text-lg">
+                                                {importedData.dept} / {importedData.empId}
+                                                {importedData.responsibilities && ` / ${importedData.responsibilities}`}
+                                            </p>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="flex items-center gap-10 mt-6 md:mt-0">
+                                    <div className="text-right">
+                                        <p className="text-xs text-slate-400 uppercase font-bold mb-1">Incentive Score</p>
+                                        <p className="text-5xl font-bold text-slate-800">{incentiveScore} <span className="text-lg text-slate-400 font-normal">/ 10</span></p>
+                                    </div>
+                                    <div className="w-px h-16 bg-slate-100 hidden md:block"></div>
+                                    <div className="text-right">
+                                        <p className="text-xs text-slate-400 uppercase font-bold mb-1">Confirmed Level</p>
+                                        <p className="text-5xl font-bold text-slate-800">{compData.level || '-'}</p>
+                                    </div>
+                                    <div className="w-px h-16 bg-slate-100 hidden md:block"></div>
+                                    <div className="bg-blue-50 px-8 py-6 rounded-2xl text-center min-w-[140px] print-hidden-bg">
+                                        <p className="text-blue-600 text-xs font-bold uppercase mb-2">Incentive Grade</p>
+                                        <p className="text-6xl font-black text-blue-600">{finalGrade}</p>
+                                    </div>
+                                </div>
+                            </div>
+
+                             {/* 2. Compensation Summary (Reordered) */}
+                            <div className="bg-white rounded-2xl shadow-lg border border-slate-200 p-6 mb-8 print-break print-hidden-bg print:shadow-none print:border-slate-300">
+                                <div className="flex items-center gap-2 mb-6 border-b border-slate-100 pb-4">
+                                    <h2 className="text-xl font-bold text-slate-800">보상 제안 내역</h2>
+                                </div>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-6">
+                                    {/* Left Column: Incentive */}
+                                    <div className="flex flex-col justify-between border-r border-slate-100 pr-6">
+                                        <div className="mb-1">
+                                            <p className="text-xs text-slate-400 font-medium mb-1">Current Level & Salary</p>
+                                            <p className="text-sm text-slate-500 font-semibold">{compData.currentLevel || '-'} / {formatNumber(compData.currentSalary) || '0'} 원</p>
+                                        </div>
+                                        <div className="mt-4">
+                                            <h3 className="text-sm font-bold text-blue-600 mb-1">제안 인센티브</h3>
+                                            <p className="text-4xl font-extrabold text-slate-900 tracking-tight">{compData.incentiveAmount || '0'} <span className="text-xl font-medium text-slate-500">원</span></p>
+                                        </div>
+                                    </div>
+
+                                    {/* Right Column: Salary */}
+                                    <div className="flex flex-col justify-end pl-2">
+                                        <div>
+                                            <h3 className="text-sm font-bold text-blue-600 mb-1">제안 연봉 (확정안)</h3>
+                                            <div className="flex items-baseline gap-3">
+                                                <p className="text-4xl font-extrabold text-slate-900 tracking-tight">{formatNumber(compData.salaryAmount) || '0'} <span className="text-xl font-medium text-slate-500">원</span></p>
+                                                {increaseRate != 0 && (
+                                                    <span className={`text-lg font-bold px-2 py-0.5 rounded ${increaseAmount > 0 ? 'bg-red-50 text-red-600' : 'bg-slate-100 text-slate-500'}`}>
+                                                        {increaseAmount > 0 ? '+' : ''}{increaseRate}%
+                                                    </span>
+                                                )}
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* 3. Qualitative Feedback Report */}
+                             <div className="bg-white rounded-2xl shadow-lg border border-slate-200 p-6 mb-8 print-break print-hidden-bg print:shadow-none print:border-slate-300">
+                                <div className="flex items-center gap-2 mb-6 border-b border-slate-100 pb-4">
+                                    <h2 className="text-xl font-bold text-slate-800">팀장 평가</h2>
+                                </div>
+                                <div className="space-y-6">
+                                    <div>
+                                        <h3 className="flex items-center gap-2 text-sm font-bold text-blue-600 mb-2"><ThumbsUp size={16} /> 강점 및 긍정적 피드백</h3>
+                                        <p className="text-slate-700 text-sm leading-relaxed whitespace-pre-wrap p-4 bg-slate-50 rounded-xl border border-slate-100 print:bg-white print:border-slate-200">{compData.strength || '내용 없음'}</p>
+                                    </div>
+                                    <div>
+                                        <h3 className="flex items-center gap-2 text-sm font-bold text-amber-600 mb-2"><TrendingUp size={16} /> 개선 필요 포인트</h3>
+                                        <p className="text-slate-700 text-sm leading-relaxed whitespace-pre-wrap p-4 bg-slate-50 rounded-xl border border-slate-100 print:bg-white print:border-slate-200">{compData.improvements || '내용 없음'}</p>
+                                    </div>
+                                    <div>
+                                        <h3 className="flex items-center gap-2 text-sm font-bold text-slate-600 mb-2"><MessageSquare size={16} /> 업무 레벨에 대한 의견</h3>
+                                        <p className="text-slate-700 text-sm leading-relaxed whitespace-pre-wrap p-4 bg-slate-50 rounded-xl border border-slate-100 print:bg-white print:border-slate-200">{compData.levelOpinion || '내용 없음'}</p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* 4. Detailed Table */}
+                            <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden mb-8 print:shadow-none">
+                                <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center print-hidden-bg">
+                                    <h3 className="font-bold text-slate-700 flex items-center gap-2">
+                                        <BarChart2 size={18} /> 프로젝트별 세부 평가 분석
+                                    </h3>
+                                </div>
+                                <div className="overflow-x-auto">
+                                    <table className="min-w-full divide-y divide-slate-100 text-sm">
+                                        <thead className="bg-slate-50 print-hidden-bg">
+                                            <tr>
+                                                <th className="px-4 py-3 text-left font-bold text-slate-500 uppercase tracking-wider w-1/4">프로젝트명 / 역할</th>
+                                                <th className="px-4 py-3 text-left font-bold text-slate-500 uppercase tracking-wider">KPI / 기여도</th>
+                                                <th className="px-4 py-3 text-center font-bold text-slate-500 uppercase tracking-wider">운영 반영</th>
+                                                {/* 자가 점수 제거됨 */}
+                                                <th className="px-4 py-3 text-center font-bold text-slate-500 uppercase tracking-wider">팀장 점수</th>
+                                                <th className="px-4 py-3 text-center font-bold text-slate-500 uppercase tracking-wider">등급</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="bg-white divide-y divide-slate-100">
+                                            {summaryData.map((row, idx) => (
+                                                <tr key={idx} className="hover:bg-slate-50/50 transition">
+                                                    <td className="px-4 py-4 align-top">
+                                                        <div className="font-bold text-slate-800 text-base mb-1">{row.name}</div>
+                                                        <div className="text-slate-500 text-xs">{row.role}</div>
+                                                    </td>
+                                                    <td className="px-4 py-4 align-top">
+                                                        <div className="text-slate-700 mb-1 font-medium">{row.kpi}</div>
+                                                        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-50 text-blue-700 print-hidden-bg border border-blue-100">
+                                                            {row.contribution}
+                                                        </span>
+                                                    </td>
+                                                    <td className="px-4 py-4 align-top text-center">
+                                                        <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                                                            row.ops && row.ops.includes('완전') ? 'bg-green-100 text-green-800' : 
+                                                            row.ops && row.ops.includes('미반영') ? 'bg-red-100 text-red-800' : 'bg-yellow-100 text-yellow-800'
+                                                        } print-hidden-bg`}>
+                                                            {row.ops ? row.ops.split('(')[0] : '-'}
+                                                        </span>
+                                                    </td>
+                                                    <td className="px-4 py-4 align-middle text-center">
+                                                        <span className="text-lg font-bold text-slate-800">{row.leaderAvg}</span>
+                                                    </td>
+                                                    <td className="px-4 py-4 align-middle text-center">
+                                                        <span className={`px-3 py-1 inline-flex text-sm font-bold rounded-lg ${
+                                                            row.grade === 'S' ? 'bg-purple-100 text-purple-700' :
+                                                            row.grade === 'A' ? 'bg-green-100 text-green-700' :
+                                                            row.grade === 'B' ? 'bg-blue-100 text-blue-700' :
+                                                            'bg-slate-100 text-slate-500'
+                                                        } print-hidden-bg`}>
+                                                            {row.grade}
+                                                        </span>
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+
+                            {/* 5. Additional Sections Report - Moved to bottom */}
+                            <div className="grid grid-cols-1 gap-6 print:break-inside-avoid mb-8">
+                                <div className="bg-white border border-slate-200 rounded-xl p-6 print:border-slate-300">
+                                    <h3 className="font-bold text-slate-800 mb-3 flex items-center gap-2 border-b pb-2">
+                                        <Target size={18} /> 차기 분기 업무 목표
+                                    </h3>
+                                    <p className="text-slate-600 whitespace-pre-wrap text-sm leading-relaxed">
+                                        {importedData.nextGoals || "내용 없음"}
+                                    </p>
+                                </div>
+                                <div className="bg-white border border-slate-200 rounded-xl p-6 print:border-slate-300">
+                                    <h3 className="font-bold text-slate-800 mb-3 flex items-center gap-2 border-b pb-2">
+                                        <Lightbulb size={18} /> 업무 프로세스 개선 제안
+                                    </h3>
+                                    <p className="text-slate-600 whitespace-pre-wrap text-sm leading-relaxed">
+                                        {importedData.improvements || "내용 없음"}
+                                    </p>
+                                </div>
+                            </div>
+
+                            {/* Footer for Report */}
+                            <div className="hidden print:block mt-12 text-center text-slate-400 text-xs border-t pt-4">
+                                <p>위 내용은 사실에 입각하여 작성되었으며, 공정한 절차에 따라 평가되었습니다.</p>
+                                <p className="mt-1">CONFIDENTIAL - INTERNAL USE ONLY</p>
+                            </div>
+                         </div>
+                    </div>
+                );
+            }
+
+            return null;
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
