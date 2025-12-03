@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>성과 관리 시스템 Pro</title>
+    <title>Project Canvas</title>
     
     <!-- React & ReactDOM (React 18) -->
     <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
@@ -96,7 +96,7 @@
             const dateStr = now.toISOString().slice(0,10).replace(/-/g, "");
             const timeStr = now.toTimeString().slice(0,5).replace(":", "");
             const periodStr = data.period ? `${data.period.year}${data.period.quarter}` : 'Unknown';
-            const typeStr = isLeader ? "팀장 평가 데이터" : "프로젝트 리뷰";
+            const typeStr = isLeader ? "리더 피드백 데이터" : "프로젝트 회고";
             
             return `${periodStr}_${dateStr}${timeStr}_${data.name}_${typeStr}.json`;
         };
@@ -301,7 +301,7 @@
                             <PolarGrid stroke="#e2e8f0" />
                             <PolarAngleAxis dataKey="subject" tick={{fontSize: 11, fill: '#64748b', fontWeight: 600}} />
                             <PolarRadiusAxis angle={30} domain={[0, 10]} tick={false} axisLine={false} />
-                            {lData && <Radar name="팀장 평가" dataKey="B" stroke="#ef4444" fill="#ef4444" fillOpacity={0.2} />}
+                            {lData && <Radar name="리더 피드백" dataKey="B" stroke="#ef4444" fill="#ef4444" fillOpacity={0.2} />}
                             <Legend iconSize={8} wrapperStyle={{fontSize: '11px', paddingTop: '10px'}}/>
                         </RadarChart>
                     </ResponsiveContainer>
@@ -429,14 +429,14 @@
             return (
                 <div className="bg-white rounded-2xl shadow-lg border border-slate-200 p-6 mb-8 mt-16 print-break print-hidden-bg print:shadow-none print:border-slate-300">
                     <div className="flex items-center gap-2 mb-6 border-b border-slate-100 pb-4">
-                        <h2 className="text-xl font-bold text-slate-800">보상 및 레벨 평가</h2>
+                        <h2 className="text-xl font-bold text-slate-800">보상 및 레벨 피드백</h2>
                     </div>
 
                     <div className="flex flex-col md:flex-row gap-8 mb-8">
                         {/* Left: Incentive Calculation */}
                         <div className="flex-1 bg-slate-50 rounded-xl p-5 print-hidden-bg border border-slate-100">
                             <h3 className="text-sm font-bold text-slate-500 mb-4 flex items-center gap-2 justify-between">
-                                <span className="flex items-center gap-2"><Target size={16}/> 인센티브 등급 산정</span>
+                                <span className="flex items-center gap-2"><Target size={16}/> 성과 인센티브</span>
                                 <label className="flex items-center gap-1 text-xs cursor-pointer text-blue-600">
                                     <input type="checkbox" checked={compData.isIncentiveTarget || false} onChange={toggleIncentiveTarget} className="accent-blue-600" />
                                     금번 지급 대상 분기입니까? (상/하반기)
@@ -484,7 +484,7 @@
                         {/* Right: Salary Level */}
                         <div className="flex-1 bg-slate-50 rounded-xl p-5 print-hidden-bg border border-slate-100">
                             <h3 className="text-sm font-bold text-slate-500 mb-4 flex items-center gap-2 justify-between">
-                                <span className="flex items-center gap-2"><Briefcase size={16}/> 연봉 레벨 평가</span>
+                                <span className="flex items-center gap-2"><Briefcase size={16}/> 연봉 및 레벨 조정</span>
                                 <label className="flex items-center gap-1 text-xs cursor-pointer text-blue-600">
                                     <input type="checkbox" checked={compData.isSalaryTarget || false} onChange={toggleSalaryTarget} className="accent-blue-600" />
                                     금번 협상 대상자입니까?
@@ -565,22 +565,22 @@
                         </div>
                         <div>
                             <label className="flex items-center gap-2 text-sm font-bold text-amber-600 mb-2">
-                                <TrendingUp size={16} /> 개선 필요 포인트
+                                <TrendingUp size={16} /> 개선 및 성장 제안
                             </label>
                             <textarea 
                                 className="w-full border border-slate-200 rounded-xl p-4 text-sm leading-normal min-h-[100px] focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 resize-none bg-slate-50"
-                                placeholder="앞으로 보완하거나 개선이 필요한 역량, 태도 등에 대해 기술해주세요."
+                                placeholder="더 나은 성장을 위해 보완하거나 개선이 필요한 역량, 태도 등에 대해 기술해주세요."
                                 value={compData.improvements || ''}
                                 onChange={(e) => handleFeedbackChange('improvements', e.target.value)}
                             ></textarea>
                         </div>
                         <div>
                             <label className="flex items-center gap-2 text-sm font-bold text-slate-600 mb-2">
-                                <MessageSquare size={16} /> 업무 레벨에 대한 의견
+                                <MessageSquare size={16} /> 커리어 레벨에 대한 의견
                             </label>
                             <textarea 
                                 className="w-full border border-slate-200 rounded-xl p-4 text-sm leading-normal min-h-[100px] focus:outline-none focus:ring-2 focus:ring-slate-500/20 focus:border-slate-500 resize-none bg-slate-50"
-                                placeholder="현재 레벨 대비 수행 수준이나 차기 레벨 진입을 위한 조언을 기술해주세요."
+                                placeholder="현재 레벨 대비 수행 수준이나 다음 단계로 나아가기 위한 조언을 기술해주세요."
                                 value={compData.levelOpinion || ''}
                                 onChange={(e) => handleFeedbackChange('levelOpinion', e.target.value)}
                             ></textarea>
@@ -660,13 +660,13 @@
                             </div>
                             
                             <div className="pt-2">
-                                <label className="text-xs font-bold text-slate-500 mb-1.5 block">비고 / 특이사항</label>
+                                <label className="text-xs font-bold text-slate-500 mb-1.5 block">회고 / 특이사항</label>
                                 <textarea 
                                     value={project.notes} 
                                     onChange={(e) => onUpdate(index, 'notes', e.target.value)} 
                                     readOnly={isLeader}
                                     className={`w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm leading-normal min-h-[80px] focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 resize-none ${isLeader ? 'bg-slate-50 text-slate-500' : 'bg-white'}`}
-                                    placeholder="프로젝트 수행 중 특이사항이나 어려웠던 점 등을 자유롭게 기술하세요."
+                                    placeholder="프로젝트 수행 중 특이사항이나 어려웠던 점, 배운 점 등을 자유롭게 기술하세요."
                                 ></textarea>
                             </div>
                         </div>
@@ -677,7 +677,7 @@
                             <div className="bg-white border border-slate-100 rounded-xl p-5 shadow-sm print-hidden-bg">
                                 <h4 className="text-sm font-bold text-slate-800 mb-4 flex items-center gap-2">
                                     <div className="w-1.5 h-4 bg-red-500 rounded-full"></div>
-                                    팀장 평가
+                                    리더 피드백
                                 </h4>
                                 <div className="grid grid-cols-2 gap-3">
                                     <SelectField label="속도 (Speed)" value={leaderEvalData?.scoreSpeed || ''} onChange={(e) => onUpdateLeaderEval(index, 'scoreSpeed', e.target.value)} options={SCORE_OPTIONS} />
@@ -686,10 +686,10 @@
                                     <SelectField label="정확성 (Accuracy)" value={leaderEvalData?.scoreAccuracy || ''} onChange={(e) => onUpdateLeaderEval(index, 'scoreAccuracy', e.target.value)} options={SCORE_OPTIONS} />
                                 </div>
                                 <div className="mt-3">
-                                     <label className="text-xs font-bold text-slate-500 mb-1.5 block">팀장 코멘트</label>
+                                     <label className="text-xs font-bold text-slate-500 mb-1.5 block">리더 코멘트</label>
                                      <textarea 
                                         className="w-full h-[60px] border border-slate-200 rounded-lg p-3 text-xs leading-normal focus:outline-none focus:ring-2 focus:ring-slate-500/20 focus:border-slate-500 resize-none bg-white"
-                                        placeholder="평가 사유"
+                                        placeholder="피드백 및 조언"
                                         value={leaderEvalData?.notes}
                                         onChange={(e) => onUpdateLeaderEval(index, 'notes', e.target.value)}
                                      ></textarea>
@@ -761,7 +761,7 @@
                 salaryAmount: '', 
                 currentSalary: '',
                 strength: '',        
-                improvements: '',    
+                improvements: '',     
                 levelOpinion: '',
                 isIncentiveTarget: false,
                 isSalaryTarget: false
@@ -882,7 +882,7 @@
                 const dateStr = now.toISOString().slice(0,10).replace(/-/g, "");
                 const timeStr = now.toTimeString().slice(0,5).replace(":", "");
                 
-                const finalFilename = filename || `${periodStr}_${dateStr}${timeStr}_${data.name}_프로젝트 리뷰.json`;
+                const finalFilename = filename || `${periodStr}_${dateStr}${timeStr}_${data.name}_프로젝트 회고.json`;
                 
                 const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(data));
                 const downloadAnchorNode = document.createElement('a');
@@ -919,7 +919,7 @@
                         const parsed = JSON.parse(e.target.result);
                         setEmployeeData(parsed);
                         if (parsed.period) setPeriod(parsed.period); 
-                        setModal({ isOpen: true, title: '불러오기 완료', message: '평가 데이터를 성공적으로 불러왔습니다.', type: 'success', action: closeModal });
+                        setModal({ isOpen: true, title: '불러오기 완료', message: '기록 데이터를 성공적으로 불러왔습니다.', type: 'success', action: closeModal });
                     } catch(err) {
                         setModal({ isOpen: true, title: '오류', message: '잘못된 파일 형식입니다.', type: 'danger', action: closeModal });
                     }
@@ -970,8 +970,8 @@
             const confirmLeaderComplete = () => {
                 setModal({
                     isOpen: true,
-                    title: '평가 완료 및 저장',
-                    message: '평가를 완료하고 대시보드로 이동합니다. 평가 데이터는 자동으로 JSON 파일로 다운로드됩니다.',
+                    title: '피드백 완료 및 저장',
+                    message: '피드백을 완료하고 대시보드로 이동합니다. 데이터는 자동으로 JSON 파일로 다운로드됩니다.',
                     type: 'success',
                     action: () => {
                         const exportData = {
@@ -986,7 +986,7 @@
                         const now = new Date();
                         const dateStr = now.toISOString().slice(0,10).replace(/-/g, "");
                         const timeStr = now.toTimeString().slice(0,5).replace(":", "");
-                        const filename = `${periodStr}_${dateStr}${timeStr}_${importedData.name}_팀장 평가 데이터.json`;
+                        const filename = `${periodStr}_${dateStr}${timeStr}_${importedData.name}_리더 피드백 데이터.json`;
 
                         downloadJSON(exportData, filename);
                         
@@ -1048,8 +1048,8 @@
                     <div className="min-h-screen flex items-center justify-center bg-slate-100 p-6">
                         <div className="max-w-4xl w-full">
                             <div className="text-center mb-10">
-                                <h1 className="text-3xl font-extrabold text-slate-800 mb-2">성과 관리 시스템</h1>
-                                <p className="text-slate-500">직원 자가 평가 및 팀장 성과 리뷰를 위한 플랫폼</p>
+                                <h1 className="text-4xl font-extrabold text-slate-800 mb-3 tracking-tight">Project Canvas</h1>
+                                <p className="text-slate-500 font-medium">내 프로젝트 기록 및 관리 플랫폼</p>
                             </div>
                             
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -1063,10 +1063,10 @@
                                         <div className="w-14 h-14 bg-blue-100 text-blue-600 rounded-2xl flex items-center justify-center mb-6 shadow-sm group-hover:bg-blue-600 group-hover:text-white transition-colors">
                                             <User size={28} />
                                         </div>
-                                        <h2 className="text-2xl font-bold text-slate-800 mb-2">직원용</h2>
-                                        <p className="text-slate-500 mb-6">자가 평가를 작성하고<br/>프로젝트 성과를 기록합니다.</p>
+                                        <h2 className="text-2xl font-bold text-slate-800 mb-2">팀원</h2>
+                                        <p className="text-slate-500 mb-6">프로젝트를 기록하고<br/>여정을 회고합니다.</p>
                                         <span className="inline-flex items-center text-blue-600 font-semibold group-hover:translate-x-1 transition-transform">
-                                            프로젝트 리뷰 <ChevronRight size={18} />
+                                            프로젝트 작성하기 <ChevronRight size={18} />
                                         </span>
                                     </div>
                                 </button>
@@ -1081,10 +1081,10 @@
                                         <div className="w-14 h-14 bg-slate-700 text-slate-300 rounded-2xl flex items-center justify-center mb-6 shadow-sm group-hover:bg-white group-hover:text-slate-800 transition-colors">
                                             <Users size={28} />
                                         </div>
-                                        <h2 className="text-2xl font-bold text-white mb-2">팀장용</h2>
-                                        <p className="text-slate-400 mb-6">직원 평가 데이터를 취합하고<br/>최종 성과 등급을 산정합니다.</p>
+                                        <h2 className="text-2xl font-bold text-white mb-2">팀장</h2>
+                                        <p className="text-slate-400 mb-6">프로젝트를 파악하고<br/>데이터를 관리합니다.</p>
                                         <span className="inline-flex items-center text-white font-semibold group-hover:translate-x-1 transition-transform">
-                                            로그인 하기 <ChevronRight size={18} />
+                                            프로젝트 확인하기 <ChevronRight size={18} />
                                         </span>
                                     </div>
                                 </button>
@@ -1103,7 +1103,7 @@
                             <div className="w-12 h-12 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-4 text-slate-600">
                                 <LayoutDashboard size={20} />
                             </div>
-                            <h2 className="text-xl font-bold mb-6 text-slate-800">관리자 접근</h2>
+                            <h2 className="text-xl font-bold mb-6 text-slate-800">팀장 접속</h2>
                             <input 
                                 type="password" 
                                 className="w-full bg-slate-50 border border-slate-200 p-3 rounded-xl mb-4 text-center text-lg focus:outline-none focus:ring-2 focus:ring-slate-800"
@@ -1122,7 +1122,7 @@
                 );
             }
 
-            // 3. Employee View오전 8:54 2025-12-01
+            // 3. Employee View
             if (mode === 'employee') {
                 const autoPeriod = getAutoReviewPeriod();
                 return (
@@ -1134,7 +1134,7 @@
                                     <div className="w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center">
                                         <ChevronRight className="rotate-180" size={18}/>
                                     </div>
-                                    <span className="hidden sm:inline">프로젝트 리뷰</span>
+                                    <span className="hidden sm:inline font-bold">Project Canvas</span>
                                 </button>
                                 
                                 <div className="flex items-center gap-4">
@@ -1168,7 +1168,7 @@
                              <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm mb-6 flex items-center justify-between">
                                 <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
                                     <Calendar size={20} className="text-slate-600"/>
-                                    평가 대상 기간
+                                    기록 대상 기간
                                 </h2>
                                 <div className="text-slate-600 font-bold text-lg">
                                     {autoPeriod.year}년 {autoPeriod.quarter}
@@ -1196,7 +1196,7 @@
                                         <FileText size={32} />
                                     </div>
                                     <h3 className="text-lg font-bold text-slate-700 mb-2">등록된 프로젝트가 없습니다</h3>
-                                    <p className="text-slate-400 mb-6 text-sm">이번 분기에 진행한 프로젝트를 추가하여 성과를 기록해보세요.</p>
+                                    <p className="text-slate-400 mb-6 text-sm">이번 분기에 진행한 프로젝트를 추가하여 경험을 기록해보세요.</p>
                                     <button onClick={addNewProject} className="px-6 py-2.5 bg-blue-50 text-blue-600 font-bold rounded-xl hover:bg-blue-100 transition">
                                         + 첫 프로젝트 추가하기
                                     </button>
@@ -1241,7 +1241,7 @@
                                     <button onClick={() => setMode('landing')} className="p-2 hover:bg-white/10 rounded-lg transition">
                                         <LogOut size={20} />
                                     </button>
-                                    <h1 className="text-lg font-bold">팀장 평가 모드</h1>
+                                    <h1 className="text-lg font-bold">피드백 모드</h1>
                                     {importedData && importedData.period && (
                                         <span className="text-sm font-medium bg-slate-800 px-3 py-1 rounded-full border border-slate-700">
                                             {importedData.period.year}년 {importedData.period.quarter}
@@ -1255,7 +1255,7 @@
                                     </button>
                                     <label className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg cursor-pointer transition text-sm font-bold shadow-lg shadow-blue-900/50">
                                         <Upload size={16} />
-                                        <span>직원 데이터 파일 열기 (.json)</span>
+                                        <span>데이터 파일 열기 (.json)</span>
                                         <input type="file" accept=".json" onChange={handleLeaderFileUpload} className="hidden" />
                                     </label>
                                 </div>
@@ -1268,15 +1268,15 @@
                                     <div className="w-20 h-20 bg-blue-50 text-blue-500 rounded-3xl flex items-center justify-center mx-auto mb-6">
                                         <Upload size={40} />
                                     </div>
-                                    <h2 className="text-2xl font-bold text-slate-800 mb-3">평가 데이터 파일이 필요합니다</h2>
-                                    <p className="text-slate-500 max-w-md mx-auto">상단 우측의 <strong className="text-blue-600">열기 버튼</strong>을 눌러 직원이 제출한 JSON 파일을 업로드해주세요.</p>
+                                    <h2 className="text-2xl font-bold text-slate-800 mb-3">멤버의 기록 파일이 필요합니다</h2>
+                                    <p className="text-slate-500 max-w-md mx-auto">상단 우측의 <strong className="text-blue-600">열기 버튼</strong>을 눌러 멤버가 제출한 JSON 파일을 업로드해주세요.</p>
                                 </div>
                             ) : (
                                 <div className="animate-fade-in">
                                     <div className="bg-white border-l-4 border-blue-600 rounded-xl shadow-sm p-6 mb-8 flex flex-col md:flex-row md:items-center justify-between gap-4">
                                         <div>
                                             <div className="flex items-center gap-2 mb-1">
-                                                <span className="px-2 py-0.5 bg-slate-100 text-slate-600 text-[10px] font-bold uppercase tracking-wider rounded">Employee</span>
+                                                <span className="px-2 py-0.5 bg-slate-100 text-slate-600 text-[10px] font-bold uppercase tracking-wider rounded">Member</span>
                                             </div>
                                             <h2 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
                                                 {importedData.name} 
@@ -1335,7 +1335,7 @@
                                             className="px-8 py-4 bg-slate-800 text-white text-lg font-bold rounded-2xl shadow-xl hover:bg-slate-900 hover:scale-105 transition transform flex items-center gap-3 mx-auto"
                                         >
                                             <CheckCircle size={24} />
-                                            평가 완료 및 대시보드 보기
+                                            피드백 완료 및 대시보드 보기
                                         </button>
                                     </div>
                                 </div>
@@ -1385,7 +1385,7 @@
                                     <button onClick={() => setMode('leader')} className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg text-sm font-medium text-slate-600 transition">
                                         <ChevronLeft size={16}/> 수정 화면으로
                                     </button>
-                                    <h1 className="text-2xl font-bold text-slate-800">성과 및 보상 제안 리포트</h1>
+                                    <h1 className="text-2xl font-bold text-slate-800">리포트</h1>
                                 </div>
                                 <div className="flex gap-3">
                                     <button onClick={() => window.print()} className="px-4 py-2 bg-slate-800 text-white rounded-lg text-sm font-medium hover:bg-slate-900 transition flex items-center gap-2 shadow-lg">
@@ -1398,8 +1398,8 @@
                             <div className="hidden print:block mb-8 border-b-2 border-slate-800 pb-4">
                                 <div className="flex justify-between items-end">
                                     <div>
-                                        <h1 className="text-3xl font-extrabold text-slate-900 mb-2">성과 및 보상 제안 리포트</h1>
-                                        <p className="text-slate-500 text-sm">Performance & Compensation Proposal Report - {importedData.period ? `${importedData.period.year} ${importedData.period.quarter}` : ''}</p>
+                                        <h1 className="text-3xl font-extrabold text-slate-900 mb-2">성장 및 보상 제안 리포트</h1>
+                                        <p className="text-slate-500 text-sm">Growth & Compensation Proposal Report - {importedData.period ? `${importedData.period.year} ${importedData.period.quarter}` : ''}</p>
                                     </div>
                                     <div className="text-right">
                                         <p className="text-slate-600 font-medium">작성 일자: {new Date().toLocaleDateString()}</p>
@@ -1480,7 +1480,7 @@
                              {/* 3. Qualitative Feedback Report */}
                              <div className="bg-white rounded-2xl shadow-lg border border-slate-200 p-6 mb-8 print-break print-hidden-bg print:shadow-none print:border-slate-300">
                                 <div className="flex items-center gap-2 mb-6 border-b border-slate-100 pb-4">
-                                    <h2 className="text-xl font-bold text-slate-800">팀장 평가</h2>
+                                    <h2 className="text-xl font-bold text-slate-800">리더 피드백</h2>
                                 </div>
                                 <div className="space-y-6">
                                     <div>
@@ -1488,11 +1488,11 @@
                                         <p className="text-slate-700 text-sm leading-relaxed whitespace-pre-wrap p-4 bg-slate-50 rounded-xl border border-slate-100 print:bg-white print:border-slate-200">{compData.strength || '내용 없음'}</p>
                                     </div>
                                     <div>
-                                        <h3 className="flex items-center gap-2 text-sm font-bold text-amber-600 mb-2"><TrendingUp size={16} /> 개선 필요 포인트</h3>
+                                        <h3 className="flex items-center gap-2 text-sm font-bold text-amber-600 mb-2"><TrendingUp size={16} /> 개선 및 성장 제안</h3>
                                         <p className="text-slate-700 text-sm leading-relaxed whitespace-pre-wrap p-4 bg-slate-50 rounded-xl border border-slate-100 print:bg-white print:border-slate-200">{compData.improvements || '내용 없음'}</p>
                                     </div>
                                     <div>
-                                        <h3 className="flex items-center gap-2 text-sm font-bold text-slate-600 mb-2"><MessageSquare size={16} /> 업무 레벨에 대한 의견</h3>
+                                        <h3 className="flex items-center gap-2 text-sm font-bold text-slate-600 mb-2"><MessageSquare size={16} /> 커리어 레벨에 대한 의견</h3>
                                         <p className="text-slate-700 text-sm leading-relaxed whitespace-pre-wrap p-4 bg-slate-50 rounded-xl border border-slate-100 print:bg-white print:border-slate-200">{compData.levelOpinion || '내용 없음'}</p>
                                     </div>
                                 </div>
@@ -1502,7 +1502,7 @@
                             <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden mb-8 print:shadow-none">
                                 <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center print-hidden-bg">
                                     <h3 className="font-bold text-slate-700 flex items-center gap-2">
-                                        <BarChart2 size={18} /> 프로젝트별 세부 평가 분석
+                                        <BarChart2 size={18} /> 프로젝트별 세부 성과 분석
                                     </h3>
                                 </div>
                                 <div className="overflow-x-auto">
@@ -1513,7 +1513,7 @@
                                                 <th className="px-4 py-3 text-left font-bold text-slate-500 uppercase tracking-wider">KPI / 기여도</th>
                                                 <th className="px-4 py-3 text-center font-bold text-slate-500 uppercase tracking-wider">운영 반영</th>
                                                 {/* 자가 점수 제거됨 */}
-                                                <th className="px-4 py-3 text-center font-bold text-slate-500 uppercase tracking-wider">팀장 점수</th>
+                                                <th className="px-4 py-3 text-center font-bold text-slate-500 uppercase tracking-wider">리더 점수</th>
                                                 <th className="px-4 py-3 text-center font-bold text-slate-500 uppercase tracking-wider">등급</th>
                                             </tr>
                                         </thead>
@@ -1548,7 +1548,7 @@
                                                             row.grade === 'B' ? 'bg-blue-100 text-blue-700' :
                                                             'bg-slate-100 text-slate-500'
                                                         } print-hidden-bg`}>
-                                                            {row.grade}
+                                                                {row.grade}
                                                         </span>
                                                     </td>
                                                 </tr>
@@ -1580,7 +1580,7 @@
 
                             {/* Footer for Report */}
                             <div className="hidden print:block mt-12 text-center text-slate-400 text-xs border-t pt-4">
-                                <p>위 내용은 사실에 입각하여 작성되었으며, 공정한 절차에 따라 평가되었습니다.</p>
+                                <p>위 내용은 사실에 입각하여 작성되었으며, 공정한 절차에 따라 확인되었습니다.</p>
                                 <p className="mt-1">CONFIDENTIAL - INTERNAL USE ONLY</p>
                             </div>
                          </div>
