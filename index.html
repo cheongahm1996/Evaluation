@@ -357,6 +357,58 @@
             async updateUser(userId, updates) {
                 const { error } = await supabaseClient.from('users').update(updates).eq('user_id', userId);
                 if (error) throw error;
+            },
+
+            // ---- 메모 API ----
+            async getMemos(userId) {
+                const { data, error } = await supabaseClient.from('user_memos').select('*').eq('user_id', userId).order('created_at', { ascending: false });
+                if (error) { console.error('getMemos error:', error); return []; }
+                return data || [];
+            },
+            async addMemo(userId, title, content) {
+                const { data, error } = await supabaseClient.from('user_memos').insert({ user_id: userId, title: title || '메모', content: content || '' }).select().maybeSingle();
+                if (error) { console.error('addMemo error:', error); return null; }
+                return data;
+            },
+            async updateMemo(memoId, content) {
+                const { error } = await supabaseClient.from('user_memos').update({ content, updated_at: new Date().toISOString() }).eq('id', memoId);
+                if (error) console.error('updateMemo error:', error);
+            },
+            async deleteMemo(memoId) {
+                const { error } = await supabaseClient.from('user_memos').delete().eq('id', memoId);
+                if (error) console.error('deleteMemo error:', error);
+            },
+
+            // ---- 템플릿 API ----
+            async getTemplates(userId) {
+                const { data, error } = await supabaseClient.from('project_templates').select('*').eq('user_id', userId).order('created_at', { ascending: false });
+                if (error) { console.error('getTemplates error:', error); return []; }
+                return data || [];
+            },
+            async addTemplate(userId, name, projectData) {
+                const { data, error } = await supabaseClient.from('project_templates').insert({ user_id: userId, name: name || '템플릿', project_data: projectData }).select().maybeSingle();
+                if (error) { console.error('addTemplate error:', error); return null; }
+                return data;
+            },
+            async deleteTemplate(templateId) {
+                const { error } = await supabaseClient.from('project_templates').delete().eq('id', templateId);
+                if (error) console.error('deleteTemplate error:', error);
+            },
+
+            // ---- 임시 저장 API ----
+            async getDrafts(userId) {
+                const { data, error } = await supabaseClient.from('user_drafts').select('*').eq('user_id', userId).order('saved_at', { ascending: false }).limit(20);
+                if (error) { console.error('getDrafts error:', error); return []; }
+                return data || [];
+            },
+            async addDraft(userId, periodData, employeeData) {
+                const { data, error } = await supabaseClient.from('user_drafts').insert({ user_id: userId, period_data: periodData, employee_data: employeeData }).select().maybeSingle();
+                if (error) { console.error('addDraft error:', error); return null; }
+                return data;
+            },
+            async deleteDraft(draftId) {
+                const { error } = await supabaseClient.from('user_drafts').delete().eq('id', draftId);
+                if (error) console.error('deleteDraft error:', error);
             }
         };
 
@@ -1109,16 +1161,20 @@
             const [leaderMyDashData, setLeaderMyDashData] = useState(null);
             const [leaderMyDashFilter, setLeaderMyDashFilter] = useState('all');
 
-            // 사용자별 메모/템플릿 로드
+            // 사용자별 메모/템플릿 DB에서 로드
             useEffect(() => {
-                if (currentUser?.user_id) {
-                    try { setMemberMemos(JSON.parse(localStorage.getItem(`member_memos_${currentUser.user_id}`) || '[]')); } catch(e) { setMemberMemos([]); }
-                    try { setProjectTemplates(JSON.parse(localStorage.getItem(`project_templates_${currentUser.user_id}`) || '[]')); } catch(e) { setProjectTemplates([]); }
+                if (currentUser?.user_id && dbConnected) {
+                    SupabaseAPI.getMemos(currentUser.user_id).then(data => {
+                        setMemberMemos(data.map(m => ({ id: m.id, title: m.title, text: m.content, createdAt: m.created_at, updatedAt: m.updated_at })));
+                    });
+                    SupabaseAPI.getTemplates(currentUser.user_id).then(data => {
+                        setProjectTemplates(data.map(t => ({ id: t.id, name: t.name, project: t.project_data, createdAt: t.created_at })));
+                    });
                 } else {
                     setMemberMemos([]);
                     setProjectTemplates([]);
                 }
-            }, [currentUser?.user_id]);
+            }, [currentUser?.user_id, dbConnected]);
 
             // Account management states
             const [newAccModal, setNewAccModal] = useState({ isOpen: false, name: '', userId: '', pw: '', role: 'member' });
@@ -1367,33 +1423,40 @@
                 setIsSaving(false);
             };
 
-            // ---- Member Memo helpers ----
-            const saveMemos = (memos) => {
-                setMemberMemos(memos);
-                if (currentUser?.user_id) localStorage.setItem(`member_memos_${currentUser.user_id}`, JSON.stringify(memos));
-            };
-            const addMemo = () => {
+            // ---- Member Memo helpers (DB) ----
+            const addMemo = async () => {
                 if (!memoNewText.trim() && !memoNewTitle.trim()) return;
-                const memo = { id: Date.now(), title: memoNewTitle.trim() || '메모', text: memoNewText.trim(), createdAt: new Date().toISOString(), updatedAt: null };
-                saveMemos([memo, ...memberMemos]);
+                const title = memoNewTitle.trim() || '메모';
+                const text = memoNewText.trim();
+                const result = await SupabaseAPI.addMemo(currentUser.user_id, title, text);
+                if (result) {
+                    setMemberMemos(prev => [{ id: result.id, title: result.title, text: result.content, createdAt: result.created_at, updatedAt: result.updated_at }, ...prev]);
+                }
                 setMemoNewText(''); setMemoNewTitle('');
             };
-            const updateMemo = (id) => {
-                saveMemos(memberMemos.map(m => m.id === id ? { ...m, text: memoEditText, updatedAt: new Date().toISOString() } : m));
+            const updateMemo = async (id) => {
+                await SupabaseAPI.updateMemo(id, memoEditText);
+                setMemberMemos(prev => prev.map(m => m.id === id ? { ...m, text: memoEditText, updatedAt: new Date().toISOString() } : m));
                 setMemoEditId(null); setMemoEditText('');
             };
-            const deleteMemo = (id) => saveMemos(memberMemos.filter(m => m.id !== id));
+            const deleteMemo = async (id) => {
+                await SupabaseAPI.deleteMemo(id);
+                setMemberMemos(prev => prev.filter(m => m.id !== id));
+            };
 
-            // ---- Project Template helpers ----
-            const saveTemplates = (templates) => {
-                setProjectTemplates(templates);
-                if (currentUser?.user_id) localStorage.setItem(`project_templates_${currentUser.user_id}`, JSON.stringify(templates));
+            // ---- Project Template helpers (DB) ----
+            const saveAsTemplate = async (project, templateName) => {
+                const name = templateName || project.name || '템플릿';
+                const projectData = { ...project, id: undefined, planStart: '', planEnd: '', actStart: '', actEnd: '' };
+                const result = await SupabaseAPI.addTemplate(currentUser.user_id, name, projectData);
+                if (result) {
+                    setProjectTemplates(prev => [{ id: result.id, name: result.name, project: result.project_data, createdAt: result.created_at }, ...prev]);
+                }
             };
-            const saveAsTemplate = (project, templateName) => {
-                const tpl = { id: Date.now(), name: templateName || project.name || '템플릿', project: { ...project, id: undefined, planStart: '', planEnd: '', actStart: '', actEnd: '' }, createdAt: new Date().toISOString() };
-                saveTemplates([tpl, ...projectTemplates]);
+            const deleteTemplate = async (id) => {
+                await SupabaseAPI.deleteTemplate(id);
+                setProjectTemplates(prev => prev.filter(t => t.id !== id));
             };
-            const deleteTemplate = (id) => saveTemplates(projectTemplates.filter(t => t.id !== id));
             const applyTemplate = (template) => {
                 const newProj = { ...template.project, id: crypto.randomUUID ? crypto.randomUUID() : Date.now().toString() };
                 setEmployeeData(prev => ({ ...prev, projects: [...prev.projects, newProj] }));
@@ -1492,32 +1555,23 @@
                 setIsLoading(false);
             };
 
-            const getDraftKey = () => `pc_drafts_${currentUser?.user_id || 'unknown'}`;
-
-            const saveDraft = () => {
+            const saveDraft = async () => {
                 try {
-                    const key = getDraftKey();
-                    const existing = JSON.parse(localStorage.getItem(key) || '[]');
-                    const draft = {
-                        id: Date.now(),
-                        savedAt: new Date().toISOString(),
-                        period: period,
-                        employeeData: employeeData
-                    };
-                    existing.unshift(draft);
-                    // 최대 20개만 유지
-                    if (existing.length > 20) existing.length = 20;
-                    localStorage.setItem(key, JSON.stringify(existing));
-                    setModal({ isOpen: true, title: '임시 저장 완료', message: '현재 작성 내용이 로컬에 임시 저장되었습니다.', type: 'success', action: closeModal });
+                    const result = await SupabaseAPI.addDraft(currentUser.user_id, period, employeeData);
+                    if (result) {
+                        setModal({ isOpen: true, title: '임시 저장 완료', message: '현재 작성 내용이 서버에 임시 저장되었습니다.', type: 'success', action: closeModal });
+                    } else {
+                        setModal({ isOpen: true, title: '저장 실패', message: '임시 저장에 실패했습니다.', type: 'danger', action: closeModal });
+                    }
                 } catch (err) {
                     setModal({ isOpen: true, title: '저장 실패', message: '임시 저장 오류: ' + err.message, type: 'danger', action: closeModal });
                 }
             };
 
-            const loadDraftList = () => {
+            const loadDraftList = async () => {
                 try {
-                    const key = getDraftKey();
-                    const drafts = JSON.parse(localStorage.getItem(key) || '[]');
+                    const data = await SupabaseAPI.getDrafts(currentUser.user_id);
+                    const drafts = data.map(d => ({ id: d.id, savedAt: d.saved_at, period: d.period_data, employeeData: d.employee_data }));
                     setDraftModal({ isOpen: true, drafts });
                 } catch(e) {
                     setDraftModal({ isOpen: true, drafts: [] });
@@ -1531,14 +1585,9 @@
                 setModal({ isOpen: true, title: '불러오기 완료', message: '임시 저장 데이터를 불러왔습니다.', type: 'success', action: closeModal });
             };
 
-            const deleteDraft = (draftId) => {
-                try {
-                    const key = getDraftKey();
-                    const existing = JSON.parse(localStorage.getItem(key) || '[]');
-                    const filtered = existing.filter(d => d.id !== draftId);
-                    localStorage.setItem(key, JSON.stringify(filtered));
-                    setDraftModal({ isOpen: true, drafts: filtered });
-                } catch(e) {}
+            const deleteDraft = async (draftId) => {
+                await SupabaseAPI.deleteDraft(draftId);
+                setDraftModal(prev => ({ ...prev, drafts: prev.drafts.filter(d => d.id !== draftId) }));
             };
 
             const submitEmployeeProjects = () => {
@@ -2415,8 +2464,8 @@
                                             showLeaderFeedback={false}
                                             onTriggerDelete={confirmRemoveProject}
                                             onUpdate={updateProject}
-                                            onSaveTemplate={!readOnly ? (proj) => {
-                                                saveAsTemplate(proj, proj.name);
+                                            onSaveTemplate={!readOnly ? async (proj) => {
+                                                await saveAsTemplate(proj, proj.name);
                                                 setModal({ isOpen: true, title: '템플릿 저장 완료', message: `"${proj.name}" 프로젝트가 템플릿으로 저장되었습니다.`, type: 'success', action: closeModal });
                                             } : undefined}
                                         />
@@ -3004,8 +3053,8 @@
                                             <div className="space-y-6">
                                                 {employeeData.projects.map((proj, idx) => (
                                                     <ProjectCard key={proj.id || idx} project={proj} index={idx} isLeader={readOnly} showLeaderFeedback={false} onTriggerDelete={confirmRemoveProject} onUpdate={updateProject}
-                                                        onSaveTemplate={!readOnly ? (p) => {
-                                                            saveAsTemplate(p, p.name);
+                                                        onSaveTemplate={!readOnly ? async (p) => {
+                                                            await saveAsTemplate(p, p.name);
                                                             setModal({ isOpen: true, title: '템플릿 저장 완료', message: `"${p.name}" 프로젝트가 템플릿으로 저장되었습니다.`, type: 'success', action: closeModal });
                                                         } : undefined}
                                                     />
