@@ -498,6 +498,8 @@
         const TrendingUp = (props) => <Icon {...props}><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></Icon>;
         const List = (props) => <Icon {...props}><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></Icon>;
         const CheckSquare = (props) => <Icon {...props}><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></Icon>;
+        const Grid3x3 = (props) => <Icon {...props}><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></Icon>;
+        const TableIcon = (props) => <Icon {...props}><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/><line x1="9" y1="3" x2="9" y2="21"/></Icon>;
         const X = (props) => <Icon {...props}><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></Icon>;
 
         const CONTRIBUTION_OPTIONS = ["핵심 기여", "중간 기여", "일부 기여", "업무 지원"];
@@ -873,7 +875,7 @@
             );
         };
 
-        const ProjectCard = ({ project, index, isLeader, onTriggerDelete, onUpdate, leaderEvalData, onUpdateLeaderEval }) => {
+        const ProjectCard = ({ project, index, isLeader, showLeaderFeedback = true, onTriggerDelete, onUpdate, leaderEvalData, onUpdateLeaderEval }) => {
             return (
                 <div className="bg-white border border-slate-200 rounded-2xl p-6 mb-6 shadow-sm hover:shadow-md transition-shadow relative print-break group print-hidden-bg">
 
@@ -954,7 +956,7 @@
 
                     </div>
 
-                    {isLeader && (
+                    {isLeader && showLeaderFeedback && (
                         <div className="mt-8 border-t border-slate-100 pt-6 animate-fade-in">
                             <h4 className="text-sm font-bold text-slate-800 mb-4 flex items-center gap-2">
                                 <div className="w-1.5 h-4 bg-red-500 rounded-full"></div>
@@ -1067,6 +1069,10 @@
             const [dashboardQuarter, setDashboardQuarter] = useState(null);
             const [dashboardData, setDashboardData] = useState([]);
             const [dashboardYear, setDashboardYear] = useState(new Date().getFullYear());
+            const [projectViewMode, setProjectViewMode] = useState('card'); // 'card' or 'table'
+            const [projectFilter, setProjectFilter] = useState('all'); // 'all' or '2025-4분기' etc.
+            const [tableSortKey, setTableSortKey] = useState(null); // column key
+            const [tableSortDir, setTableSortDir] = useState('asc'); // 'asc' or 'desc'
 
             // Account management states
             const [newAccModal, setNewAccModal] = useState({ isOpen: false, name: '', userId: '', pw: '', role: 'member' });
@@ -1198,24 +1204,10 @@
                 }
             }, [leaderActiveTab]);
 
-            // Load assignments for admin view filtering
+            // Refresh employee data when returning to leader-home or switching to employees tab
             useEffect(() => {
-                if (mode === 'leader-home' && leaderActiveTab === 'employees' && currentUser?.role === 'admin' && dbConnected) {
-                    const loadAdminView = async () => {
-                        const { data: assignments } = await supabaseClient.from('admin_assignments').select('employee_id').eq('admin_user_id', currentUser.user_id);
-                        const assignedEmpIds = (assignments || []).map(a => a.employee_id);
-                        if (assignedEmpIds.length === 0) {
-                            setAllReviewData([]);
-                            return;
-                        }
-                        const { data: emps } = await supabaseClient.from('employees').select('*').in('id', assignedEmpIds);
-                        const reviews = await Promise.all((emps || []).map(async (emp) => {
-                            const periods = await SupabaseAPI.getReviewPeriodsForEmployee(emp.id);
-                            return { employee: emp, periods };
-                        }));
-                        setAllReviewData(reviews);
-                    };
-                    loadAdminView();
+                if (mode === 'leader-home' && leaderActiveTab === 'employees' && (currentUser?.role === 'leader' || currentUser?.role === 'admin') && dbConnected) {
+                    refreshAllReviewData();
                 }
             }, [leaderActiveTab, mode]);
 
@@ -1625,6 +1617,8 @@
                             const filename = `${periodStr}_${dateStr}${timeStr}_${importedData.name}_리더 피드백 데이터.json`;
                             downloadJSON(exportData, filename);
                             closeModal();
+                            // Refresh data in background so list is up-to-date when returning
+                            refreshAllReviewData();
                             setMode('leader-report');
                         } catch (err) {
                             closeModal();
@@ -1746,6 +1740,99 @@
                     console.error('Dashboard load error:', err);
                     setDashboardData([]);
                 }
+            };
+
+            // Reusable refresh function for allReviewData
+            const refreshAllReviewData = useCallback(async () => {
+                if (!dbConnected || !currentUser) return;
+                try {
+                    if (currentUser.role === 'admin') {
+                        const { data: assignments } = await supabaseClient.from('admin_assignments').select('employee_id').eq('admin_user_id', currentUser.user_id);
+                        const assignedEmpIds = (assignments || []).map(a => a.employee_id);
+                        if (assignedEmpIds.length > 0) {
+                            const { data: emps } = await supabaseClient.from('employees').select('*').in('id', assignedEmpIds);
+                            const reviews = await Promise.all((emps || []).map(async (emp) => {
+                                const periods = await SupabaseAPI.getReviewPeriodsForEmployee(emp.id);
+                                return { employee: emp, periods };
+                            }));
+                            setAllReviewData(reviews);
+                        } else {
+                            setAllReviewData([]);
+                        }
+                    } else {
+                        const emps = await SupabaseAPI.getAllEmployees();
+                        const reviews = await Promise.all(emps.map(async (emp) => {
+                            const periods = await SupabaseAPI.getReviewPeriodsForEmployee(emp.id);
+                            return { employee: emp, periods };
+                        }));
+                        setAllReviewData(reviews);
+                    }
+                } catch (err) {
+                    console.error('Refresh error:', err);
+                }
+            }, [dbConnected, currentUser]);
+
+            // Import Historical Data (과거 데이터 불러오기)
+            const [importProgress, setImportProgress] = useState({ isOpen: false, total: 0, current: 0, results: [], isComplete: false });
+
+            const importHistoricalData = async (e) => {
+                const files = Array.from(e.target.files || []);
+                if (files.length === 0) return;
+                e.target.value = ''; // reset input
+
+                setImportProgress({ isOpen: true, total: files.length, current: 0, results: [], isComplete: false });
+                const results = [];
+
+                for (let i = 0; i < files.length; i++) {
+                    try {
+                        const text = await files[i].text();
+                        const parsed = JSON.parse(text);
+
+                        if (!parsed.name || !parsed.empId || !parsed.period) {
+                            results.push({ file: files[i].name, success: false, error: '필수 필드 누락 (name, empId, period)' });
+                            setImportProgress(prev => ({ ...prev, current: i + 1, results: [...results] }));
+                            continue;
+                        }
+
+                        // 1. Save employee + projects
+                        const empData = {
+                            name: parsed.name,
+                            empId: parsed.empId,
+                            dept: parsed.dept || '',
+                            responsibilities: parsed.responsibilities || '',
+                            projects: parsed.projects || [],
+                            nextGoals: parsed.nextGoals || '',
+                            improvements: parsed.improvements || ''
+                        };
+                        const periodData = parsed.period;
+                        const { employeeId, reviewPeriodId } = await SupabaseAPI.saveEmployeeData(empData, periodData, true);
+
+                        // 2. Save leader evaluations if present
+                        if (parsed.leaderEvaluations || parsed.compData) {
+                            const leaderEvalData = parsed.leaderEvaluations || {};
+                            const compImport = parsed.compData || {
+                                level: '', currentLevel: '', incentiveAmount: '', salaryAmount: '', currentSalary: '',
+                                strength: '', improvements: '', levelOpinion: '', isIncentiveTarget: false, isSalaryTarget: false
+                            };
+                            await SupabaseAPI.saveLeaderFeedback(reviewPeriodId, employeeId, parsed.projects || [], leaderEvalData, compImport);
+                        }
+
+                        // 3. Mark as leader reviewed if applicable
+                        if (parsed.isLeaderReviewed) {
+                            await supabaseClient.from('review_periods').update({ is_leader_reviewed: true }).eq('id', reviewPeriodId);
+                        }
+
+                        results.push({ file: files[i].name, success: true, name: parsed.name, period: `${periodData.year} ${periodData.quarter}`, projects: (parsed.projects || []).length });
+                    } catch (err) {
+                        results.push({ file: files[i].name, success: false, error: err.message });
+                    }
+                    setImportProgress(prev => ({ ...prev, current: i + 1, results: [...results] }));
+                }
+
+                setImportProgress(prev => ({ ...prev, isComplete: true, results }));
+
+                // Refresh employee list
+                await refreshAllReviewData();
             };
 
             // LOGIN SCREEN
@@ -1970,6 +2057,7 @@
                                             project={project}
                                             index={idx}
                                             isLeader={readOnly}
+                                            showLeaderFeedback={false}
                                             onTriggerDelete={confirmRemoveProject}
                                             onUpdate={updateProject}
                                         />
@@ -2087,17 +2175,111 @@
                                 )}
                             </div>
 
-                            {leaderActiveTab === 'employees' && (
+                            {leaderActiveTab === 'employees' && (() => {
+                                // Collect all unique quarters for filter
+                                const allQuarters = [];
+                                allReviewData.forEach(({ periods }) => {
+                                    periods.forEach(pd => {
+                                        const key = `${pd.year}-${pd.quarter}`;
+                                        if (!allQuarters.find(q => q.key === key)) {
+                                            allQuarters.push({ key, year: pd.year, quarter: pd.quarter, label: `${pd.year} ${pd.quarter}` });
+                                        }
+                                    });
+                                });
+                                allQuarters.sort((a, b) => {
+                                    if (a.year !== b.year) return String(b.year).localeCompare(String(a.year));
+                                    return b.quarter.localeCompare(a.quarter);
+                                });
+
+                                // Filter data based on selected quarter
+                                const filteredData = projectFilter === 'all' ? allReviewData : allReviewData.map(({ employee, periods }) => ({
+                                    employee,
+                                    periods: periods.filter(pd => `${pd.year}-${pd.quarter}` === projectFilter)
+                                })).filter(({ periods }) => periods.length > 0);
+
+                                // Build flat rows for table view
+                                const buildTableRows = () => {
+                                    const rows = [];
+                                    filteredData.forEach(({ employee, periods }) => {
+                                        periods.forEach(pd => {
+                                            rows.push({ employee, pd, sortName: employee.name || '', sortQuarter: `${pd.year} ${pd.quarter}`, sortDate: pd.submitted_at || pd.created_at || '', sortStatus: pd.is_leader_reviewed ? '검토완료' : '검토필요' });
+                                        });
+                                    });
+                                    if (tableSortKey) {
+                                        rows.sort((a, b) => {
+                                            let va, vb;
+                                            if (tableSortKey === 'name') { va = a.sortName; vb = b.sortName; }
+                                            else if (tableSortKey === 'quarter') { va = a.sortQuarter; vb = b.sortQuarter; }
+                                            else if (tableSortKey === 'date') { va = a.sortDate; vb = b.sortDate; }
+                                            else if (tableSortKey === 'status') { va = a.sortStatus; vb = b.sortStatus; }
+                                            else { va = ''; vb = ''; }
+                                            const cmp = String(va).localeCompare(String(vb), 'ko');
+                                            return tableSortDir === 'asc' ? cmp : -cmp;
+                                        });
+                                    }
+                                    return rows;
+                                };
+
+                                const handleSort = (key) => {
+                                    if (tableSortKey === key) {
+                                        setTableSortDir(prev => prev === 'asc' ? 'desc' : 'asc');
+                                    } else {
+                                        setTableSortKey(key);
+                                        setTableSortDir('asc');
+                                    }
+                                };
+
+                                const SortIcon = ({ col }) => {
+                                    if (tableSortKey !== col) return <span className="text-slate-600 ml-1">↕</span>;
+                                    return <span className="text-blue-400 ml-1">{tableSortDir === 'asc' ? '↑' : '↓'}</span>;
+                                };
+
+                                return (
                                 <div>
-                                    <h2 className="text-xl font-bold text-white mb-6">제출된 프로젝트 현황</h2>
-                                    {allReviewData.length === 0 ? (
+                                    {/* Header Row */}
+                                    <div className="flex items-center justify-between mb-4">
+                                        <div className="flex items-center gap-4">
+                                            <h2 className="text-xl font-bold text-white">제출된 프로젝트 현황</h2>
+                                            <div className="flex bg-slate-700 rounded-lg p-0.5">
+                                                <button onClick={() => setProjectViewMode('card')} className={`p-2 rounded-md transition ${projectViewMode === 'card' ? 'bg-blue-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`} title="카드 보기">
+                                                    <Grid3x3 size={16} />
+                                                </button>
+                                                <button onClick={() => setProjectViewMode('table')} className={`p-2 rounded-md transition ${projectViewMode === 'table' ? 'bg-blue-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`} title="테이블 보기">
+                                                    <TableIcon size={16} />
+                                                </button>
+                                            </div>
+                                        </div>
+                                        {currentUser?.role === 'leader' && (
+                                            <label className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-teal-600 to-teal-500 text-white rounded-xl text-sm font-bold hover:from-teal-700 hover:to-teal-600 transition cursor-pointer shadow-lg shadow-teal-600/20">
+                                                <Upload size={16} /> 과거 데이터 불러오기
+                                                <input type="file" accept=".json" multiple className="hidden" onChange={importHistoricalData} />
+                                            </label>
+                                        )}
+                                    </div>
+
+                                    {/* Filter Bar */}
+                                    {allQuarters.length > 0 && (
+                                        <div className="flex items-center gap-2 mb-5 flex-wrap">
+                                            <span className="text-xs font-bold text-slate-500 uppercase tracking-wider mr-1">필터</span>
+                                            <button onClick={() => setProjectFilter('all')} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${projectFilter === 'all' ? 'bg-blue-600 text-white shadow' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'}`}>
+                                                전체
+                                            </button>
+                                            {allQuarters.map(q => (
+                                                <button key={q.key} onClick={() => setProjectFilter(q.key)} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${projectFilter === q.key ? 'bg-blue-600 text-white shadow' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'}`}>
+                                                    {q.label}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    )}
+
+                                    {filteredData.length === 0 ? (
                                         <div className="bg-slate-800 rounded-2xl border border-slate-700 p-12 text-center">
                                             <FileText size={40} className="mx-auto mb-4 text-slate-600" />
-                                            <p className="text-slate-400">제출된 프로젝트 데이터가 없습니다.</p>
+                                            <p className="text-slate-400">{projectFilter === 'all' ? '제출된 프로젝트 데이터가 없습니다.' : '해당 분기에 제출된 데이터가 없습니다.'}</p>
                                         </div>
-                                    ) : (
+                                    ) : projectViewMode === 'card' ? (
                                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                                            {allReviewData.map(({ employee, periods }) => (
+                                            {filteredData.map(({ employee, periods }) => (
                                                 <div key={employee.id} className="bg-slate-800 rounded-2xl border border-slate-700 overflow-hidden hover:border-slate-500 transition">
                                                     <div className="p-5 border-b border-slate-700">
                                                         <div className="flex items-center gap-3">
@@ -2125,12 +2307,7 @@
                                                                             action: async () => {
                                                                                 try {
                                                                                     await SupabaseAPI.deleteReviewPeriod(pd.id);
-                                                                                    const emps = await SupabaseAPI.getAllEmployees();
-                                                                                    const reviews = await Promise.all(emps.map(async (emp) => {
-                                                                                        const periods = await SupabaseAPI.getReviewPeriodsForEmployee(emp.id);
-                                                                                        return { employee: emp, periods };
-                                                                                    }));
-                                                                                    setAllReviewData(reviews);
+                                                                                    await refreshAllReviewData();
                                                                                     closeModal();
                                                                                 } catch (err) {
                                                                                     closeModal();
@@ -2168,9 +2345,105 @@
                                                 </div>
                                             ))}
                                         </div>
+                                    ) : (
+                                        /* TABLE VIEW with Sorting */
+                                        <div className="bg-slate-800 rounded-2xl border border-slate-700 overflow-hidden">
+                                            <div className="overflow-x-auto">
+                                                <table className="w-full">
+                                                    <thead>
+                                                        <tr className="border-b border-slate-700">
+                                                            <th className="px-4 py-3 text-left text-xs font-bold text-slate-400 uppercase tracking-wider cursor-pointer hover:text-slate-200 transition select-none" onClick={() => handleSort('name')}>
+                                                                직원<SortIcon col="name" />
+                                                            </th>
+                                                            <th className="px-4 py-3 text-center text-xs font-bold text-slate-400 uppercase tracking-wider cursor-pointer hover:text-slate-200 transition select-none" onClick={() => handleSort('quarter')}>
+                                                                분기<SortIcon col="quarter" />
+                                                            </th>
+                                                            <th className="px-4 py-3 text-center text-xs font-bold text-slate-400 uppercase tracking-wider cursor-pointer hover:text-slate-200 transition select-none" onClick={() => handleSort('date')}>
+                                                                제출일<SortIcon col="date" />
+                                                            </th>
+                                                            <th className="px-4 py-3 text-center text-xs font-bold text-slate-400 uppercase tracking-wider cursor-pointer hover:text-slate-200 transition select-none" onClick={() => handleSort('status')}>
+                                                                상태<SortIcon col="status" />
+                                                            </th>
+                                                            <th className="px-4 py-3 text-center text-xs font-bold text-slate-400 uppercase tracking-wider">액션</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody className="divide-y divide-slate-700/50">
+                                                        {buildTableRows().map(({ employee, pd }) => (
+                                                            <tr key={pd.id} className="hover:bg-slate-700/30 transition group/row cursor-pointer"
+                                                                onContextMenu={(e) => {
+                                                                    if (currentUser?.role !== 'leader') return;
+                                                                    e.preventDefault();
+                                                                    setModal({
+                                                                        isOpen: true, title: '데이터 삭제', type: 'danger',
+                                                                        message: `${employee.name}의 ${pd.year} ${pd.quarter} 데이터를 삭제하시겠습니까?`,
+                                                                        action: async () => {
+                                                                            try {
+                                                                                await SupabaseAPI.deleteReviewPeriod(pd.id);
+                                                                                await refreshAllReviewData();
+                                                                                closeModal();
+                                                                            } catch (err) {
+                                                                                closeModal();
+                                                                                setModal({ isOpen: true, title: '삭제 실패', message: err.message, type: 'danger', action: closeModal });
+                                                                            }
+                                                                        }
+                                                                    });
+                                                                }}
+                                                            >
+                                                                <td className="px-4 py-3">
+                                                                    <div className="flex items-center gap-3">
+                                                                        <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center text-white font-bold text-xs flex-shrink-0">
+                                                                            {employee.name?.charAt(0) || '?'}
+                                                                        </div>
+                                                                        <div>
+                                                                            <p className="text-white font-bold text-sm">{employee.name}</p>
+                                                                            <p className="text-slate-500 text-[10px]">{employee.emp_id}</p>
+                                                                        </div>
+                                                                    </div>
+                                                                </td>
+                                                                <td className="px-4 py-3 text-center">
+                                                                    <span className="text-slate-200 font-bold text-sm">{pd.year} {pd.quarter}</span>
+                                                                </td>
+                                                                <td className="px-4 py-3 text-center">
+                                                                    <div className="text-slate-400 text-xs">
+                                                                        {pd.submitted_at ? new Date(pd.submitted_at).toLocaleString('ko-KR', {year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}) : new Date(pd.created_at).toLocaleDateString('ko-KR')}
+                                                                    </div>
+                                                                    {pd.updated_at && <p className="text-amber-400 text-[10px] mt-0.5">수정: {new Date(pd.updated_at).toLocaleString('ko-KR', {month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'})}</p>}
+                                                                </td>
+                                                                <td className="px-4 py-3 text-center">
+                                                                    <div className="flex items-center justify-center gap-1">
+                                                                        {pd.is_modified && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-400">수정됨</span>}
+                                                                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${pd.is_leader_reviewed ? 'bg-green-900/50 text-green-400' : 'bg-amber-900/50 text-amber-400'}`}>
+                                                                            {pd.is_leader_reviewed ? '검토완료' : '검토필요'}
+                                                                        </span>
+                                                                    </div>
+                                                                </td>
+                                                                <td className="px-4 py-3 text-center">
+                                                                    <div className="flex items-center justify-center gap-2">
+                                                                        <button onClick={() => loadEmployeeForLeader(employee.id, pd.id)} className="px-3 py-1.5 bg-blue-600/20 text-blue-400 text-xs font-bold rounded-lg hover:bg-blue-600/40 transition">
+                                                                            {pd.is_leader_reviewed ? '수정' : '검토'}
+                                                                        </button>
+                                                                        {pd.is_leader_reviewed && (
+                                                                            <button onClick={() => viewReportDirectly(employee.id, pd.id)} className="px-3 py-1.5 bg-green-900/40 text-green-400 text-xs font-bold rounded-lg hover:bg-green-800/60 transition">
+                                                                                리포트
+                                                                            </button>
+                                                                        )}
+                                                                    </div>
+                                                                </td>
+                                                            </tr>
+                                                        ))}
+                                                        {buildTableRows().length === 0 && (
+                                                            <tr>
+                                                                <td colSpan="5" className="px-4 py-8 text-center text-slate-500">데이터가 없습니다.</td>
+                                                            </tr>
+                                                        )}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        </div>
                                     )}
                                 </div>
-                            )}
+                                );
+                            })()}
 
                             {leaderActiveTab === 'myprojects' && leaderMyView === 'list' && (() => {
                                 const availableQuarters = getAvailableQuarters();
@@ -2278,7 +2551,7 @@
 
                                             <div className="space-y-6">
                                                 {employeeData.projects.map((proj, idx) => (
-                                                    <ProjectCard key={proj.id || idx} project={proj} index={idx} isLeader={readOnly} onTriggerDelete={confirmRemoveProject} onUpdate={updateProject} />
+                                                    <ProjectCard key={proj.id || idx} project={proj} index={idx} isLeader={readOnly} showLeaderFeedback={false} onTriggerDelete={confirmRemoveProject} onUpdate={updateProject} />
                                                 ))}
                                                 {!readOnly && (
                                                     <button onClick={addNewProject} className="w-full py-4 border-2 border-dashed border-blue-300 rounded-2xl text-blue-600 font-bold hover:bg-blue-50 transition flex items-center justify-center gap-2">
@@ -2763,6 +3036,72 @@
                                                         </div>
                                                     );
                                                 })}
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* 과거 데이터 불러오기 진행 모달 */}
+                        {importProgress.isOpen && (
+                            <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+                                <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full max-h-[80vh] overflow-hidden flex flex-col">
+                                    <div className="p-5 border-b border-slate-200 flex items-center justify-between">
+                                        <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                                            <Upload size={20} className="text-teal-600" />
+                                            과거 데이터 불러오기
+                                        </h3>
+                                        {importProgress.isComplete && (
+                                            <button onClick={() => setImportProgress({ isOpen: false, total: 0, current: 0, results: [], isComplete: false })} className="p-1 text-slate-400 hover:text-slate-700 transition">
+                                                <X size={20} />
+                                            </button>
+                                        )}
+                                    </div>
+                                    <div className="p-5 flex-1 overflow-y-auto">
+                                        {/* Progress Bar */}
+                                        <div className="mb-4">
+                                            <div className="flex justify-between text-xs font-bold text-slate-500 mb-1.5">
+                                                <span>{importProgress.isComplete ? '완료' : '처리 중...'}</span>
+                                                <span>{importProgress.current} / {importProgress.total}</span>
+                                            </div>
+                                            <div className="w-full bg-slate-200 rounded-full h-2.5 overflow-hidden">
+                                                <div className={`h-full rounded-full transition-all duration-300 ${importProgress.isComplete ? 'bg-green-500' : 'bg-teal-500'}`}
+                                                    style={{ width: `${importProgress.total > 0 ? (importProgress.current / importProgress.total * 100) : 0}%` }} />
+                                            </div>
+                                        </div>
+
+                                        {/* Results */}
+                                        <div className="space-y-2">
+                                            {importProgress.results.map((r, idx) => (
+                                                <div key={idx} className={`p-3 rounded-xl border text-sm ${r.success ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
+                                                    <div className="flex items-center gap-2">
+                                                        {r.success ? <CheckCircle size={16} className="text-green-600 flex-shrink-0" /> : <AlertCircle size={16} className="text-red-600 flex-shrink-0" />}
+                                                        <span className="font-bold text-slate-800 truncate">{r.file}</span>
+                                                    </div>
+                                                    {r.success ? (
+                                                        <p className="text-green-700 text-xs mt-1 ml-6">{r.name} · {r.period} · 프로젝트 {r.projects}건 저장 완료</p>
+                                                    ) : (
+                                                        <p className="text-red-700 text-xs mt-1 ml-6">{r.error}</p>
+                                                    )}
+                                                </div>
+                                            ))}
+                                        </div>
+
+                                        {importProgress.isComplete && (
+                                            <div className="mt-4 pt-4 border-t border-slate-200">
+                                                <div className="flex items-center justify-between">
+                                                    <div className="text-sm text-slate-600">
+                                                        <span className="font-bold text-green-600">{importProgress.results.filter(r => r.success).length}</span>건 성공
+                                                        {importProgress.results.filter(r => !r.success).length > 0 && (
+                                                            <span className="ml-2"><span className="font-bold text-red-600">{importProgress.results.filter(r => !r.success).length}</span>건 실패</span>
+                                                        )}
+                                                    </div>
+                                                    <button onClick={() => setImportProgress({ isOpen: false, total: 0, current: 0, results: [], isComplete: false })}
+                                                        className="px-5 py-2 bg-teal-600 text-white rounded-xl font-bold hover:bg-teal-700 transition text-sm">
+                                                        확인
+                                                    </button>
+                                                </div>
                                             </div>
                                         )}
                                     </div>
