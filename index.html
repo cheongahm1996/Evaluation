@@ -409,6 +409,33 @@
             async deleteDraft(draftId) {
                 const { error } = await supabaseClient.from('user_drafts').delete().eq('id', draftId);
                 if (error) console.error('deleteDraft error:', error);
+            },
+
+            // ---- 카운트다운 API ----
+            async getActiveCountdown() {
+                const { data, error } = await supabaseClient.from('countdown_settings').select('*').eq('is_active', true).order('created_at', { ascending: false }).limit(1).maybeSingle();
+                if (error) { console.error('getActiveCountdown error:', error); return null; }
+                return data;
+            },
+            async getAllCountdowns() {
+                const { data, error } = await supabaseClient.from('countdown_settings').select('*').order('created_at', { ascending: false });
+                if (error) { console.error('getAllCountdowns error:', error); return []; }
+                return data || [];
+            },
+            async createCountdown(title, deadline, createdBy) {
+                // 기존 활성 카운트다운 비활성화
+                await supabaseClient.from('countdown_settings').update({ is_active: false }).eq('is_active', true);
+                const { data, error } = await supabaseClient.from('countdown_settings').insert({ title, deadline, is_active: true, created_by: createdBy }).select().maybeSingle();
+                if (error) { console.error('createCountdown error:', error); return null; }
+                return data;
+            },
+            async stopCountdown(countdownId) {
+                const { error } = await supabaseClient.from('countdown_settings').update({ is_active: false, updated_at: new Date().toISOString() }).eq('id', countdownId);
+                if (error) console.error('stopCountdown error:', error);
+            },
+            async deleteCountdown(countdownId) {
+                const { error } = await supabaseClient.from('countdown_settings').delete().eq('id', countdownId);
+                if (error) console.error('deleteCountdown error:', error);
             }
         };
 
@@ -559,6 +586,9 @@
         const Copy = (props) => <Icon {...props}><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></Icon>;
         const Home = (props) => <Icon {...props}><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></Icon>;
         const Edit = (props) => <Icon {...props}><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></Icon>;
+        const Clock = (props) => <Icon {...props}><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></Icon>;
+        const StopCircle = (props) => <Icon {...props}><circle cx="12" cy="12" r="10"/><rect x="9" y="9" width="6" height="6"/></Icon>;
+        const Play = (props) => <Icon {...props}><polygon points="5 3 19 12 5 21 5 3"/></Icon>;
         const X = (props) => <Icon {...props}><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></Icon>;
 
         const CONTRIBUTION_OPTIONS = ["핵심 기여", "중간 기여", "일부 기여", "업무 지원"];
@@ -1161,6 +1191,12 @@
             const [leaderMyDashData, setLeaderMyDashData] = useState(null);
             const [leaderMyDashFilter, setLeaderMyDashFilter] = useState('all');
 
+            // 카운트다운 관련 state
+            const [countdownData, setCountdownData] = useState(null); // 활성 카운트다운 (DB)
+            const [countdownRemaining, setCountdownRemaining] = useState(null); // { days, hours, minutes, seconds }
+            const [countdownModal, setCountdownModal] = useState({ isOpen: false, title: '', date: '', time: '' });
+            const [allCountdowns, setAllCountdowns] = useState([]);
+
             // 사용자별 메모/템플릿 DB에서 로드
             useEffect(() => {
                 if (currentUser?.user_id && dbConnected) {
@@ -1175,6 +1211,44 @@
                     setProjectTemplates([]);
                 }
             }, [currentUser?.user_id, dbConnected]);
+
+            // 카운트다운 DB에서 로드
+            const loadCountdown = async () => {
+                if (!dbConnected) return;
+                const cd = await SupabaseAPI.getActiveCountdown();
+                setCountdownData(cd);
+            };
+
+            useEffect(() => {
+                if (dbConnected) loadCountdown();
+            }, [dbConnected]);
+
+            // 카운트다운 1초 타이머
+            useEffect(() => {
+                if (!countdownData || !countdownData.is_active) {
+                    setCountdownRemaining(null);
+                    return;
+                }
+                const tick = () => {
+                    const now = new Date().getTime();
+                    const deadline = new Date(countdownData.deadline).getTime();
+                    const diff = deadline - now;
+                    if (diff <= 0) {
+                        setCountdownRemaining({ days: 0, hours: 0, minutes: 0, seconds: 0, expired: true });
+                        return;
+                    }
+                    setCountdownRemaining({
+                        days: Math.floor(diff / (1000 * 60 * 60 * 24)),
+                        hours: Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60)),
+                        minutes: Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60)),
+                        seconds: Math.floor((diff % (1000 * 60)) / 1000),
+                        expired: false
+                    });
+                };
+                tick();
+                const interval = setInterval(tick, 1000);
+                return () => clearInterval(interval);
+            }, [countdownData]);
 
             // Account management states
             const [newAccModal, setNewAccModal] = useState({ isOpen: false, name: '', userId: '', pw: '', role: 'member' });
@@ -2106,23 +2180,64 @@
                             {memberActiveTab === 'home' && (
                                 <>
                                     <div className="bg-slate-800 rounded-2xl border border-slate-700 p-8 mb-8">
-                                        <h2 className="text-2xl font-bold text-white mb-2">내 프로젝트 캔버스</h2>
-                                        <p className="text-slate-400 mb-6">안녕하세요, {currentUser?.name}님</p>
+                                        <div className="flex items-start gap-6">
+                                            <div className="flex-1">
+                                                <h2 className="text-2xl font-bold text-white mb-2">내 프로젝트 캔버스</h2>
+                                                <p className="text-slate-400 mb-6">안녕하세요, {currentUser?.name}님</p>
 
-                                        {writableQuarters.length > 0 ? (
-                                            <div className="flex flex-wrap gap-3">
-                                                {writableQuarters.map(q => (
-                                                    <button key={`${q.year}-${q.quarter}`} onClick={() => startMemberWrite(q)} className="px-6 py-3 bg-blue-600 text-white rounded-lg font-bold hover:bg-blue-700 transition flex items-center gap-2">
-                                                        <Plus size={20} /> {q.year}년 {q.quarter} 작성하기
-                                                    </button>
-                                                ))}
+                                                {writableQuarters.length > 0 ? (
+                                                    <div className="flex flex-wrap gap-3">
+                                                        {writableQuarters.map(q => (
+                                                            <button key={`${q.year}-${q.quarter}`} onClick={() => startMemberWrite(q)} className="px-6 py-3 bg-blue-600 text-white rounded-lg font-bold hover:bg-blue-700 transition flex items-center gap-2">
+                                                                <Plus size={20} /> {q.year}년 {q.quarter} 작성하기
+                                                            </button>
+                                                        ))}
+                                                    </div>
+                                                ) : (
+                                                    <div className="px-4 py-3 bg-slate-700/50 rounded-lg border border-slate-600 text-sm text-slate-400">
+                                                        <CheckCircle size={16} className="inline mr-1.5 text-green-500" />
+                                                        이번 분기 작성이 완료되었습니다.
+                                                    </div>
+                                                )}
                                             </div>
-                                        ) : (
-                                            <div className="px-4 py-3 bg-slate-700/50 rounded-lg border border-slate-600 text-sm text-slate-400">
-                                                <CheckCircle size={16} className="inline mr-1.5 text-green-500" />
-                                                이번 분기 작성이 완료되었습니다.
-                                            </div>
-                                        )}
+
+                                            {/* 카운트다운 영역 */}
+                                            {countdownData && countdownData.is_active && countdownRemaining && (
+                                                <div className="w-72 shrink-0 bg-gradient-to-br from-slate-700/80 to-slate-800 rounded-xl border border-slate-600 p-5 text-center">
+                                                    <div className="flex items-center justify-center gap-2 mb-3">
+                                                        <Clock size={16} className="text-amber-400" />
+                                                        <p className="text-sm font-bold text-amber-400">{countdownData.title}</p>
+                                                    </div>
+                                                    {countdownRemaining.expired ? (
+                                                        <p className="text-lg font-bold text-red-400">마감 시간이 지났습니다</p>
+                                                    ) : (
+                                                        <>
+                                                            <div className="flex justify-center gap-2 mb-3">
+                                                                <div className="bg-slate-900/80 rounded-lg px-3 py-2 min-w-[56px]">
+                                                                    <p className="text-2xl font-black text-white tabular-nums">{String(countdownRemaining.days).padStart(2,'0')}</p>
+                                                                    <p className="text-[10px] text-slate-500 mt-0.5">일</p>
+                                                                </div>
+                                                                <div className="bg-slate-900/80 rounded-lg px-3 py-2 min-w-[56px]">
+                                                                    <p className="text-2xl font-black text-white tabular-nums">{String(countdownRemaining.hours).padStart(2,'0')}</p>
+                                                                    <p className="text-[10px] text-slate-500 mt-0.5">시간</p>
+                                                                </div>
+                                                                <div className="bg-slate-900/80 rounded-lg px-3 py-2 min-w-[56px]">
+                                                                    <p className="text-2xl font-black text-white tabular-nums">{String(countdownRemaining.minutes).padStart(2,'0')}</p>
+                                                                    <p className="text-[10px] text-slate-500 mt-0.5">분</p>
+                                                                </div>
+                                                                <div className="bg-slate-900/80 rounded-lg px-3 py-2 min-w-[56px]">
+                                                                    <p className="text-2xl font-black text-amber-400 tabular-nums">{String(countdownRemaining.seconds).padStart(2,'0')}</p>
+                                                                    <p className="text-[10px] text-slate-500 mt-0.5">초</p>
+                                                                </div>
+                                                            </div>
+                                                            <p className="text-[11px] text-slate-500">
+                                                                마감: {new Date(countdownData.deadline).toLocaleString('ko-KR', {year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit'})}
+                                                            </p>
+                                                        </>
+                                                    )}
+                                                </div>
+                                            )}
+                                        </div>
                                     </div>
 
                                     <div className="space-y-4">
@@ -3632,6 +3747,108 @@
                                                 ))}
                                             </tbody>
                                         </table>
+                                    </div>
+
+                                    {/* 카운트 설정 섹션 */}
+                                    {currentUser?.role === 'leader' && (
+                                        <div className="mt-8 pt-8 border-t border-slate-200">
+                                            <div className="flex items-center justify-between mb-4">
+                                                <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2"><Clock size={20} className="text-amber-500" /> 제출 마감 카운트 설정</h3>
+                                                <button onClick={() => {
+                                                    const now = new Date();
+                                                    const defDate = now.toISOString().split('T')[0];
+                                                    setCountdownModal({ isOpen: true, title: '', date: defDate, time: '20:00' });
+                                                }} className="px-4 py-2 bg-amber-500 text-white rounded-lg text-sm font-bold hover:bg-amber-600 transition flex items-center gap-1.5">
+                                                    <Plus size={14}/> 카운트 설정
+                                                </button>
+                                            </div>
+
+                                            {/* 현재 활성 카운트다운 */}
+                                            {countdownData && countdownData.is_active ? (
+                                                <div className="bg-amber-50 border border-amber-200 rounded-xl p-5 mb-4">
+                                                    <div className="flex items-center justify-between">
+                                                        <div>
+                                                            <div className="flex items-center gap-2 mb-1">
+                                                                <span className="inline-block w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
+                                                                <span className="text-xs font-bold text-green-700">카운트 진행 중</span>
+                                                            </div>
+                                                            <p className="text-lg font-bold text-slate-800">{countdownData.title}</p>
+                                                            <p className="text-sm text-slate-600 mt-1">
+                                                                마감: {new Date(countdownData.deadline).toLocaleString('ko-KR', {year:'numeric', month:'long', day:'numeric', hour:'2-digit', minute:'2-digit'})}
+                                                            </p>
+                                                            {countdownRemaining && !countdownRemaining.expired && (
+                                                                <p className="text-sm text-amber-700 font-bold mt-2">
+                                                                    남은 시간: {countdownRemaining.days}일 {countdownRemaining.hours}시간 {countdownRemaining.minutes}분 {countdownRemaining.seconds}초
+                                                                </p>
+                                                            )}
+                                                            {countdownRemaining && countdownRemaining.expired && (
+                                                                <p className="text-sm text-red-600 font-bold mt-2">마감 시간이 지났습니다</p>
+                                                            )}
+                                                        </div>
+                                                        <button onClick={async () => {
+                                                            if (!confirm('카운트를 중지하시겠습니까? 팀원 페이지에서 카운트가 숨겨집니다.')) return;
+                                                            await SupabaseAPI.stopCountdown(countdownData.id);
+                                                            setCountdownData(null);
+                                                            setCountdownRemaining(null);
+                                                        }} className="px-4 py-2.5 bg-red-500 text-white rounded-lg text-sm font-bold hover:bg-red-600 transition flex items-center gap-1.5">
+                                                            <StopCircle size={16} /> 중지
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            ) : (
+                                                <div className="bg-slate-50 border border-slate-200 rounded-xl p-5 mb-4 text-center">
+                                                    <p className="text-slate-400 text-sm">현재 진행 중인 카운트가 없습니다.</p>
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
+                            {/* 카운트 설정 모달 */}
+                            {countdownModal.isOpen && (
+                                <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={() => setCountdownModal({...countdownModal, isOpen: false})}>
+                                    <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6" onClick={e => e.stopPropagation()}>
+                                        <h3 className="text-lg font-bold text-slate-800 mb-1 flex items-center gap-2"><Clock size={20} className="text-amber-500" /> 카운트 설정</h3>
+                                        <p className="text-xs text-slate-500 mb-5">설정한 마감 시간까지 팀원 페이지에 카운트다운이 표시됩니다.</p>
+                                        <div className="space-y-4">
+                                            <div>
+                                                <label className="text-xs font-bold text-slate-500 mb-1 block">타이틀</label>
+                                                <input type="text" value={countdownModal.title} onChange={(e) => setCountdownModal({...countdownModal, title: e.target.value})}
+                                                    className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500" placeholder="예: 26년 1분기 프로젝트 제출까지" />
+                                            </div>
+                                            <div className="grid grid-cols-2 gap-3">
+                                                <div>
+                                                    <label className="text-xs font-bold text-slate-500 mb-1 block">마감 일자</label>
+                                                    <input type="date" value={countdownModal.date} onChange={(e) => setCountdownModal({...countdownModal, date: e.target.value})}
+                                                        className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500" />
+                                                </div>
+                                                <div>
+                                                    <label className="text-xs font-bold text-slate-500 mb-1 block">마감 시간</label>
+                                                    <input type="time" value={countdownModal.time} onChange={(e) => setCountdownModal({...countdownModal, time: e.target.value})}
+                                                        className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500" />
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div className="flex gap-3 mt-6">
+                                            <button onClick={() => setCountdownModal({...countdownModal, isOpen: false})} className="flex-1 px-4 py-2.5 bg-slate-100 text-slate-700 font-medium rounded-xl hover:bg-slate-200 transition">취소</button>
+                                            <button onClick={async () => {
+                                                if (!countdownModal.title.trim()) { alert('타이틀을 입력하세요.'); return; }
+                                                if (!countdownModal.date || !countdownModal.time) { alert('마감 일자와 시간을 입력하세요.'); return; }
+                                                const deadline = new Date(`${countdownModal.date}T${countdownModal.time}:00`);
+                                                if (isNaN(deadline.getTime())) { alert('올바른 날짜/시간을 입력하세요.'); return; }
+                                                const result = await SupabaseAPI.createCountdown(countdownModal.title.trim(), deadline.toISOString(), currentUser.user_id);
+                                                if (result) {
+                                                    setCountdownData(result);
+                                                    setCountdownModal({ isOpen: false, title: '', date: '', time: '' });
+                                                    setModal({ isOpen: true, title: '카운트 설정 완료', message: '팀원 페이지에 카운트다운이 표시됩니다.', type: 'success', action: closeModal });
+                                                } else {
+                                                    alert('카운트 설정에 실패했습니다.');
+                                                }
+                                            }} className="flex-1 px-4 py-2.5 bg-amber-500 text-white font-bold rounded-xl hover:bg-amber-600 transition flex items-center justify-center gap-1.5">
+                                                <Play size={14} /> 카운트 시작
+                                            </button>
+                                        </div>
                                     </div>
                                 </div>
                             )}
