@@ -43,6 +43,15 @@
             scrollbar-width: none;
         }
 
+        @keyframes slideDown {
+            from { opacity: 0; max-height: 0; transform: translateY(-8px); }
+            to { opacity: 1; max-height: 800px; transform: translateY(0); }
+        }
+        .animate-slideDown {
+            animation: slideDown 0.25s ease-out forwards;
+            overflow: hidden;
+        }
+
         input[type="date"] {
             position: relative;
             cursor: pointer;
@@ -558,6 +567,7 @@
         const ChevronRight = (props) => <Icon {...props}><polyline points="9 18 15 12 9 6"/></Icon>;
         const ChevronLeft = (props) => <Icon {...props}><polyline points="15 18 9 12 15 6"/></Icon>;
         const ChevronUp = (props) => <Icon {...props}><polyline points="18 15 12 9 6 15"/></Icon>;
+        const ChevronDown = (props) => <Icon {...props}><polyline points="6 9 12 15 18 9"/></Icon>;
         const LayoutDashboard = (props) => <Icon {...props}><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></Icon>;
         const Settings = (props) => <Icon {...props}><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></Icon>;
         const FileText = (props) => <Icon {...props}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></Icon>;
@@ -1173,6 +1183,10 @@
             const [dashboardQuarter, setDashboardQuarter] = useState(null);
             const [dashboardData, setDashboardData] = useState([]);
             const [dashboardYear, setDashboardYear] = useState(new Date().getFullYear());
+            const [dashboardExpandedId, setDashboardExpandedId] = useState(null); // 팀 대시보드 아코디언
+            const [dashboardExpandedProjects, setDashboardExpandedProjects] = useState([]); // 확장된 직원의 프로젝트 목록
+            const [myDashExpandedProjId, setMyDashExpandedProjId] = useState(null); // 내 대시보드 프로젝트 아코디언
+            const [dashboardAutoLoaded, setDashboardAutoLoaded] = useState(false); // 자동 로드 여부
             const [projectViewMode, setProjectViewMode] = useState('card'); // 'card' or 'table'
             const [projectFilter, setProjectFilter] = useState('all'); // 'all' or '2025-4분기' etc.
             const [tableSortKey, setTableSortKey] = useState(null); // column key
@@ -1253,6 +1267,59 @@
                 return () => clearInterval(interval);
             }, [countdownData]);
 
+            // 브라우저 뒤로가기 네비게이션 (SPA history)
+            const pushHistory = (newMode, extra) => {
+                const state = { mode: newMode, ...(extra || {}) };
+                window.history.pushState(state, '', '');
+            };
+
+            useEffect(() => {
+                const handlePopState = (e) => {
+                    const state = e.state;
+                    if (!state || !state.mode) {
+                        // 기본: 로그인 상태면 홈으로
+                        if (currentUser) {
+                            if (currentUser.role === 'leader' || currentUser.role === 'admin') {
+                                setMode('leader-home');
+                            } else {
+                                setMode('member-home');
+                            }
+                        }
+                        return;
+                    }
+                    setMode(state.mode);
+                    if (state.leaderActiveTab) setLeaderActiveTab(state.leaderActiveTab);
+                    if (state.memberActiveTab) setMemberActiveTab(state.memberActiveTab);
+                };
+                window.addEventListener('popstate', handlePopState);
+                return () => window.removeEventListener('popstate', handlePopState);
+            }, [currentUser]);
+
+            // mode 변경 시 history에 push
+            useEffect(() => {
+                if (mode === 'login' || mode === 'change-password') return;
+                // 현재 상태와 동일하면 push 하지 않음
+                const currentState = window.history.state;
+                if (currentState && currentState.mode === mode) return;
+                pushHistory(mode, {
+                    leaderActiveTab: leaderActiveTab,
+                    memberActiveTab: memberActiveTab
+                });
+            }, [mode]);
+
+            // 탭 변경 시 history push
+            useEffect(() => {
+                if (mode !== 'leader-home' && mode !== 'member-home') return;
+                const currentState = window.history.state;
+                const tabKey = mode === 'leader-home' ? 'leaderActiveTab' : 'memberActiveTab';
+                const tabVal = mode === 'leader-home' ? leaderActiveTab : memberActiveTab;
+                if (currentState && currentState.mode === mode && currentState[tabKey] === tabVal) return;
+                pushHistory(mode, {
+                    leaderActiveTab: leaderActiveTab,
+                    memberActiveTab: memberActiveTab
+                });
+            }, [leaderActiveTab, memberActiveTab]);
+
             // Account management states
             const [newAccModal, setNewAccModal] = useState({ isOpen: false, name: '', userId: '', pw: '', role: 'member', team: '', salary: '' });
             const [editingAccId, setEditingAccId] = useState(null);
@@ -1262,6 +1329,9 @@
             const [draftModal, setDraftModal] = useState({ isOpen: false, drafts: [] });
             const [isEditMode, setIsEditMode] = useState(false);
             const [isSubmitted, setIsSubmitted] = useState(false);
+
+            // AI 면담 모달 state
+            const [aiInterviewModal, setAiInterviewModal] = useState({ isOpen: false, data: null });
 
             useEffect(() => {
                 SupabaseAPI.testConnection().then(ok => setDbConnected(ok));
@@ -1423,6 +1493,9 @@
                 setNewPw('');
                 setConfirmPw('');
                 setPwChangeError('');
+                setDashboardAutoLoaded(false);
+                setDashboardQuarter(null);
+                setDashboardData([]);
             };
 
             const downloadJSON = (data, filename) => {
@@ -1859,6 +1932,403 @@
                 });
             };
 
+            // AI 면담 생성 함수 (마스터 전용)
+            const generateAiInterview = () => {
+                const projects = importedData.projects || [];
+                const empName = importedData.name || '직원';
+                const periodStr = `${period.year} ${period.quarter}`;
+                const overallScore = calculateIncentiveScore(projects, leaderEval);
+                const numScore = Number(overallScore);
+
+                // 프로젝트별 평가 분석
+                const projectAnalysis = projects.map((proj, idx) => {
+                    const ev = leaderEval[idx] || {};
+                    const speed = Number(ev.scoreSpeed || 0);
+                    const quality = Number(ev.scoreQuality || 0);
+                    const comm = Number(ev.scoreComm || 0);
+                    const accuracy = Number(ev.scoreAccuracy || 0);
+                    const scores = [speed, quality, comm, accuracy].filter(s => s > 0);
+                    const avg = scores.length > 0 ? (scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(1) : null;
+                    return {
+                        name: proj.name || `프로젝트 ${idx + 1}`,
+                        role: proj.role || '',
+                        contribution: proj.contribution || '',
+                        kpi: proj.kpi || '',
+                        notes: proj.notes || '',
+                        opsStatus: proj.opsStatus || '',
+                        speed, quality, comm, accuracy,
+                        avg: avg ? parseFloat(avg) : null,
+                        evalNotes: ev.notes || ''
+                    };
+                });
+
+                const scoredProjects = projectAnalysis.filter(p => p.avg !== null);
+                const bestProject = scoredProjects.length > 0 ? scoredProjects.reduce((a, b) => (a.avg || 0) >= (b.avg || 0) ? a : b) : null;
+                const weakProject = scoredProjects.length > 1 ? scoredProjects.reduce((a, b) => (a.avg || 10) <= (b.avg || 10) ? a : b) : null;
+
+                // 강점/약점 분석
+                const allSpeed = scoredProjects.map(p => p.speed).filter(Boolean);
+                const allQuality = scoredProjects.map(p => p.quality).filter(Boolean);
+                const allComm = scoredProjects.map(p => p.comm).filter(Boolean);
+                const allAccuracy = scoredProjects.map(p => p.accuracy).filter(Boolean);
+                const avgByCategory = {
+                    speed: allSpeed.length > 0 ? (allSpeed.reduce((a,b)=>a+b,0)/allSpeed.length).toFixed(1) : '-',
+                    quality: allQuality.length > 0 ? (allQuality.reduce((a,b)=>a+b,0)/allQuality.length).toFixed(1) : '-',
+                    comm: allComm.length > 0 ? (allComm.reduce((a,b)=>a+b,0)/allComm.length).toFixed(1) : '-',
+                    accuracy: allAccuracy.length > 0 ? (allAccuracy.reduce((a,b)=>a+b,0)/allAccuracy.length).toFixed(1) : '-'
+                };
+
+                const categoryScores = [
+                    { key: 'speed', label: '업무 속도', score: parseFloat(avgByCategory.speed) || 0 },
+                    { key: 'quality', label: '업무 품질', score: parseFloat(avgByCategory.quality) || 0 },
+                    { key: 'comm', label: '커뮤니케이션', score: parseFloat(avgByCategory.comm) || 0 },
+                    { key: 'accuracy', label: '정확도', score: parseFloat(avgByCategory.accuracy) || 0 }
+                ].filter(c => c.score > 0).sort((a, b) => b.score - a.score);
+
+                const strengths = categoryScores.filter(c => c.score >= 7);
+                const weaknesses = categoryScores.filter(c => c.score < 6);
+
+                // 등급 결정
+                let grade = 'B';
+                if (numScore >= 9.0) grade = 'S';
+                else if (numScore >= 8.0) grade = 'A';
+                else if (numScore >= 6.0) grade = 'B';
+                else if (numScore >= 4.0) grade = 'C';
+                else if (numScore > 0) grade = 'D';
+
+                // 면담 톤 결정
+                const isExcellent = numScore >= 8.0;
+                const isGood = numScore >= 6.0 && numScore < 8.0;
+                const needsImprovement = numScore > 0 && numScore < 6.0;
+                const notEvaluated = numScore === 0;
+
+                // 보상 정보
+                const currentSalary = compData?.currentSalary ? Number(compData.currentSalary) : 0;
+                const salaryAmount = compData?.salaryAmount ? Number(compData.salaryAmount) : 0;
+                const incentiveAmount = compData?.incentiveAmount ? Number(compData.incentiveAmount) : 0;
+                const currentLevel = compData?.currentLevel || '';
+                const confirmedLevel = compData?.level || '';
+
+                // 자기계발 목표
+                const nextGoals = importedData.nextGoals || '';
+                const improvements = importedData.improvements || '';
+
+                // ===== 면담 프로세스 생성 =====
+                const interviewProcess = [
+                    { step: 1, title: '오프닝 & 라포 형성', duration: '3~5분', desc: '편안한 분위기 조성, 면담 목적 안내' },
+                    { step: 2, title: '성과 데이터 공유', duration: '5~7분', desc: '프로젝트별 성과와 점수를 함께 확인' },
+                    { step: 3, title: '강점 인정 및 격려', duration: '3~5분', desc: '우수한 영역에 대한 구체적 칭찬' },
+                    { step: 4, title: '개선 영역 논의', duration: '5~7분', desc: '부족한 부분에 대한 건설적 피드백' },
+                    { step: 5, title: '목표 설정 및 성장 계획', duration: '5분', desc: '다음 분기 목표와 역량 개발 방향 합의' },
+                    { step: 6, title: '보상 안내 (해당 시)', duration: '3분', desc: '레벨/연봉/인센티브 변동 사항 공유' },
+                    { step: 7, title: '클로징', duration: '2~3분', desc: '종합 정리 및 응원의 메시지' }
+                ];
+
+                // ===== 면담 스크립트 생성 =====
+                const scripts = [];
+
+                // STEP 1: 오프닝
+                scripts.push({
+                    step: 1,
+                    title: '오프닝 & 라포 형성',
+                    icon: '👋',
+                    lines: [
+                        { speaker: 'leader', text: `${empName}님, 바쁜 와중에 시간 내주셔서 감사합니다. 오늘은 ${periodStr} 성과 면담을 진행하려고 합니다.` },
+                        { speaker: 'leader', text: '이번 분기에 정말 다양한 프로젝트를 수행해주셨는데, 그 과정에서 느낀 점이나 어려웠던 부분이 있으셨나요?' },
+                        { speaker: 'tip', text: '직원이 자유롭게 이야기할 수 있도록 경청하는 자세를 보여주세요. 고개를 끄덕이며 "네, 그렇군요"와 같은 리액션이 효과적입니다.' }
+                    ]
+                });
+
+                // STEP 2: 성과 데이터 공유
+                const projSummaryLines = [];
+                projSummaryLines.push({ speaker: 'leader', text: `이번 분기에 총 ${projects.length}개의 프로젝트를 수행해주셨습니다. 각 프로젝트별 성과를 함께 확인해볼까요?` });
+
+                if (bestProject) {
+                    projSummaryLines.push({ speaker: 'leader', text: `먼저 "${bestProject.name}"${bestProject.contribution ? ` (${bestProject.contribution})` : ''}의 경우, 평균 ${bestProject.avg}점으로 가장 우수한 성과를 보여주셨습니다.${bestProject.evalNotes ? ` ${bestProject.evalNotes}` : ''}` });
+                }
+
+                projectAnalysis.filter(p => p.avg !== null && p !== bestProject).forEach(proj => {
+                    if (proj.avg >= 7) {
+                        projSummaryLines.push({ speaker: 'leader', text: `"${proj.name}"도 ${proj.avg}점으로 좋은 성과를 보여주셨습니다.${proj.evalNotes ? ` 특히, ${proj.evalNotes}` : ''}` });
+                    }
+                });
+
+                if (weakProject && weakProject !== bestProject && weakProject.avg < 6) {
+                    projSummaryLines.push({ speaker: 'leader', text: `다만, "${weakProject.name}"의 경우 ${weakProject.avg}점으로 아쉬운 부분이 있었는데요. 이 부분에 대해 ${empName}님 생각은 어떠신가요?` });
+                    projSummaryLines.push({ speaker: 'tip', text: '직원의 설명을 경청한 후, 원인 분석에 초점을 맞추세요. 비난이 아닌 이해의 관점에서 접근합니다.' });
+                }
+
+                if (numScore > 0) {
+                    projSummaryLines.push({ speaker: 'leader', text: `종합적으로 이번 분기 평균 점수는 ${overallScore}점(${grade}등급)입니다.` });
+                }
+
+                scripts.push({ step: 2, title: '성과 데이터 공유', icon: '📊', lines: projSummaryLines });
+
+                // STEP 3: 강점 인정
+                const strengthLines = [];
+                if (strengths.length > 0) {
+                    const strengthNames = strengths.map(s => `${s.label}(${s.score}점)`).join(', ');
+                    strengthLines.push({ speaker: 'leader', text: `${empName}님의 이번 분기 강점 영역은 ${strengthNames}입니다.` });
+
+                    strengths.forEach(s => {
+                        if (s.key === 'speed') strengthLines.push({ speaker: 'leader', text: '업무 처리 속도가 뛰어나셔서, 팀 전체의 일정 관리에 큰 도움이 되고 있습니다. 이런 추진력을 정말 높이 평가합니다.' });
+                        if (s.key === 'quality') strengthLines.push({ speaker: 'leader', text: '결과물의 품질이 일관되게 높으셔서 신뢰가 갑니다. 꼼꼼한 작업 습관이 팀의 기준을 높여주고 있습니다.' });
+                        if (s.key === 'comm') strengthLines.push({ speaker: 'leader', text: '커뮤니케이션 역량이 우수하셔서 협업 과정이 매끄럽습니다. 동료들에게도 좋은 영향을 주고 계십니다.' });
+                        if (s.key === 'accuracy') strengthLines.push({ speaker: 'leader', text: '업무 정확도가 높으셔서 재작업이 거의 없고, 이는 팀 효율에 크게 기여하고 있습니다.' });
+                    });
+                } else if (isExcellent) {
+                    strengthLines.push({ speaker: 'leader', text: `${empName}님, 이번 분기 전반적으로 뛰어난 성과를 보여주셨습니다. 모든 영역에서 고르게 좋은 결과를 만들어주신 점이 인상적입니다.` });
+                } else {
+                    strengthLines.push({ speaker: 'leader', text: `${empName}님이 이번 분기에 다양한 프로젝트를 책임감 있게 수행해주신 점을 인정합니다. 특히 맡은 역할에 최선을 다해주신 부분을 높이 평가합니다.` });
+                }
+                strengthLines.push({ speaker: 'tip', text: '구체적인 사례를 언급하면 칭찬의 진정성이 높아집니다. "~할 때 정말 잘하셨어요"와 같이 표현해주세요.' });
+
+                scripts.push({ step: 3, title: '강점 인정 및 격려', icon: '⭐', lines: strengthLines });
+
+                // STEP 4: 개선 영역
+                const improvementLines = [];
+                if (weaknesses.length > 0) {
+                    const weakNames = weaknesses.map(s => `${s.label}(${s.score}점)`).join(', ');
+                    improvementLines.push({ speaker: 'leader', text: `한편, ${weakNames} 영역은 조금 더 발전의 여지가 있어 보입니다. 이 부분에 대해 어떻게 느끼고 계신지 들어보고 싶습니다.` });
+
+                    weaknesses.forEach(s => {
+                        if (s.key === 'speed') improvementLines.push({ speaker: 'leader', text: '업무 처리 속도 부분에서 조금 아쉬운 점이 있었는데요. 혹시 업무량이 과중했거나, 장애 요인이 있었는지 궁금합니다. 필요한 지원이 있다면 말씀해주세요.' });
+                        if (s.key === 'quality') improvementLines.push({ speaker: 'leader', text: '결과물 품질 면에서 기대 수준과 차이가 있었는데요. 업무 프로세스나 검수 과정에서 개선할 수 있는 부분이 있을까요? 함께 방법을 찾아보면 좋겠습니다.' });
+                        if (s.key === 'comm') improvementLines.push({ speaker: 'leader', text: '커뮤니케이션 부분에서 보완이 되면 더 좋을 것 같습니다. 팀 내 소통에서 불편했던 점이나 개선 아이디어가 있으시면 편하게 말씀해주세요.' });
+                        if (s.key === 'accuracy') improvementLines.push({ speaker: 'leader', text: '정확도 측면에서 몇 가지 아쉬운 점이 있었습니다. 업무 체크리스트나 리뷰 프로세스를 보완하면 충분히 개선될 수 있을 거라 생각합니다.' });
+                    });
+                } else if (needsImprovement) {
+                    improvementLines.push({ speaker: 'leader', text: `이번 분기 전반적인 점수가 기대에 조금 못 미쳤는데요. ${empName}님이 보시기에 어떤 부분이 가장 어려우셨는지 솔직하게 나눠주시면 함께 해결책을 찾아보겠습니다.` });
+                } else {
+                    improvementLines.push({ speaker: 'leader', text: `전반적으로 잘 수행해주셨지만, 한 단계 더 성장하기 위해 어떤 부분을 개선하면 좋을지 함께 이야기해볼까요?` });
+                }
+
+                if (improvements) {
+                    improvementLines.push({ speaker: 'leader', text: `${empName}님이 직접 작성해주신 개선사항을 보면 "${improvements.substring(0, 100)}${improvements.length > 100 ? '...' : ''}" 라고 하셨는데, 이 부분에 대해 어떤 지원이 필요하신가요?` });
+                }
+
+                improvementLines.push({ speaker: 'tip', text: '"나도 비슷한 경험이 있었는데..."와 같이 공감을 표현하면 방어적 반응을 줄일 수 있습니다. 개선점을 말한 후 반드시 직원의 의견을 물어보세요.' });
+
+                scripts.push({ step: 4, title: '개선 영역 논의', icon: '🔧', lines: improvementLines });
+
+                // STEP 5: 목표 설정
+                const goalLines = [];
+                goalLines.push({ speaker: 'leader', text: '다음 분기를 위한 목표를 함께 정해보면 좋겠습니다.' });
+
+                if (nextGoals) {
+                    goalLines.push({ speaker: 'leader', text: `${empName}님이 작성해주신 다음 분기 목표를 보면 "${nextGoals.substring(0, 120)}${nextGoals.length > 120 ? '...' : ''}" 이라고 하셨는데, 이 방향에 대해 함께 구체적인 실행 방안을 이야기해볼까요?` });
+                } else {
+                    goalLines.push({ speaker: 'leader', text: '다음 분기에 특별히 도전해보고 싶은 프로젝트나 역량 개발 목표가 있으신가요?' });
+                }
+
+                if (weaknesses.length > 0) {
+                    const weakArea = weaknesses[0];
+                    goalLines.push({ speaker: 'leader', text: `특히 ${weakArea.label} 영역을 강화하기 위한 구체적인 액션 플랜을 함께 만들어보면 어떨까요? 제가 도움을 드릴 수 있는 부분이 있다면 적극 지원하겠습니다.` });
+                }
+
+                goalLines.push({ speaker: 'tip', text: 'SMART 원칙(구체적, 측정 가능, 달성 가능, 관련성, 기한)에 맞게 목표를 설정하도록 유도하세요.' });
+
+                scripts.push({ step: 5, title: '목표 설정 및 성장 계획', icon: '🎯', lines: goalLines });
+
+                // STEP 6: 보상 안내
+                const compLines = [];
+                if (salaryAmount > 0 || incentiveAmount > 0 || confirmedLevel) {
+                    compLines.push({ speaker: 'leader', text: `이번 분기 성과를 종합적으로 반영하여 보상 사항을 안내드리겠습니다.` });
+                    if (confirmedLevel && currentLevel && confirmedLevel !== currentLevel) {
+                        compLines.push({ speaker: 'leader', text: `먼저, 레벨이 ${currentLevel}에서 ${confirmedLevel}로 조정됩니다. ${empName}님의 성장을 반영한 결과입니다.` });
+                    } else if (confirmedLevel) {
+                        compLines.push({ speaker: 'leader', text: `현재 레벨 ${confirmedLevel}을 유지하게 됩니다.` });
+                    }
+                    if (salaryAmount > 0) {
+                        compLines.push({ speaker: 'leader', text: `연봉은 ${currentSalary > 0 ? currentSalary.toLocaleString() + '원에서 ' : ''}${salaryAmount.toLocaleString()}원으로 ${currentSalary > 0 && salaryAmount > currentSalary ? '인상' : '조정'}됩니다.` });
+                    }
+                    if (incentiveAmount > 0) {
+                        compLines.push({ speaker: 'leader', text: `또한 이번 분기 성과 인센티브로 ${incentiveAmount.toLocaleString()}원이 지급될 예정입니다. ${empName}님의 기여에 대한 감사의 표시입니다.` });
+                    }
+                    compLines.push({ speaker: 'tip', text: '보상 안내 시 감사와 인정의 맥락에서 전달하세요. "충분한 보상인지 모르겠지만..."과 같은 표현은 피하는 것이 좋습니다.' });
+                } else {
+                    compLines.push({ speaker: 'leader', text: '보상 관련 사항은 추후 확정되는 대로 별도 안내드리겠습니다.' });
+                    compLines.push({ speaker: 'tip', text: '보상이 확정되지 않은 경우, 명확한 시기를 언급하면 직원의 불안감을 줄일 수 있습니다.' });
+                }
+
+                scripts.push({ step: 6, title: '보상 안내', icon: '💰', lines: compLines });
+
+                // STEP 7: 클로징
+                const closingLines = [];
+                if (isExcellent) {
+                    closingLines.push({ speaker: 'leader', text: `${empName}님, 이번 분기 정말 훌륭한 성과를 보여주셔서 감사합니다. 앞으로도 ${empName}님의 역량과 열정이라면 더 큰 성과를 만들어내실 수 있을 거라 확신합니다.` });
+                } else if (isGood) {
+                    closingLines.push({ speaker: 'leader', text: `${empName}님, 이번 분기도 수고 많으셨습니다. 좋은 성과를 기반으로 다음 분기에는 한 단계 더 성장하실 수 있을 거라 기대합니다. 제가 도울 수 있는 부분은 언제든 말씀해주세요.` });
+                } else if (needsImprovement) {
+                    closingLines.push({ speaker: 'leader', text: `${empName}님, 솔직하게 이야기 나눠주셔서 감사합니다. 이번 분기의 경험을 성장의 발판으로 삼아 다음 분기에는 더 좋은 결과를 함께 만들어봅시다. 저도 적극적으로 지원하겠습니다.` });
+                } else {
+                    closingLines.push({ speaker: 'leader', text: `${empName}님, 오늘 면담 감사합니다. 다음 분기에도 좋은 성과를 기대하며, 필요한 지원이 있으면 언제든 편하게 말씀해주세요.` });
+                }
+                closingLines.push({ speaker: 'leader', text: '오늘 이야기 나눈 내용 중에 추가로 하고 싶은 말씀이나 궁금한 점이 있으신가요?' });
+                closingLines.push({ speaker: 'tip', text: '면담을 마무리할 때는 항상 긍정적인 톤으로 끝내세요. 직원이 에너지를 얻고 나갈 수 있도록 격려의 말을 잊지 마세요.' });
+
+                scripts.push({ step: 7, title: '클로징', icon: '🤝', lines: closingLines });
+
+                // ===== 면담 방식 추천 =====
+                const interviewMethods = [];
+                if (isExcellent) {
+                    interviewMethods.push({ method: '칭찬 중심 면담', desc: '우수 성과자에게는 구체적 칭찬으로 동기를 부여하고, 더 높은 도전 기회를 제안합니다.', icon: '🌟' });
+                    interviewMethods.push({ method: '비전 공유 면담', desc: '탁월한 성과를 인정하면서 조직 내 성장 경로와 비전을 함께 논의합니다.', icon: '🚀' });
+                } else if (isGood) {
+                    interviewMethods.push({ method: '균형 피드백 면담', desc: '강점을 충분히 인정한 후, 개선 영역에 대해 건설적으로 논의하는 방식입니다.', icon: '⚖️' });
+                    interviewMethods.push({ method: '코칭형 면담', desc: '질문을 통해 직원 스스로 개선점을 발견하도록 유도하는 면담 방식입니다.', icon: '💡' });
+                } else if (needsImprovement) {
+                    interviewMethods.push({ method: '지원 중심 면담', desc: '어려움의 원인을 파악하고, 필요한 리소스와 지원 방안을 함께 모색합니다.', icon: '🤲' });
+                    interviewMethods.push({ method: '성장 계획 면담', desc: '부족한 부분에 대한 구체적인 개선 액션 플랜을 함께 수립합니다.', icon: '📋' });
+                } else {
+                    interviewMethods.push({ method: '탐색적 면담', desc: '아직 평가가 완료되지 않은 경우, 직원의 자기 평가를 먼저 들어보는 방식입니다.', icon: '🔍' });
+                }
+                interviewMethods.push({ method: '공감적 경청', desc: '모든 면담의 기본입니다. 직원의 이야기를 70% 이상 듣고, 30% 이하로 말하세요.', icon: '👂' });
+
+                setAiInterviewModal({
+                    isOpen: true,
+                    data: {
+                        empName,
+                        periodStr,
+                        overallScore: numScore,
+                        grade,
+                        projectCount: projects.length,
+                        projectAnalysis,
+                        categoryScores,
+                        strengths,
+                        weaknesses,
+                        interviewProcess,
+                        scripts,
+                        interviewMethods,
+                        bestProject,
+                        weakProject
+                    }
+                });
+            };
+
+            // AI 면담 모달 렌더 함수 (중복 방지)
+            const renderAiInterviewModal = () => {
+                if (!aiInterviewModal.isOpen || !aiInterviewModal.data) return null;
+                const d = aiInterviewModal.data;
+                return (
+                    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.7)' }}>
+                        <div className="bg-slate-900 rounded-2xl border border-slate-700 shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden">
+                            <div className="bg-gradient-to-r from-purple-900/80 to-blue-900/80 px-6 py-5 border-b border-slate-700 shrink-0">
+                                <div className="flex items-center justify-between">
+                                    <div>
+                                        <div className="flex items-center gap-3 mb-1">
+                                            <Activity size={22} className="text-purple-400" />
+                                            <h2 className="text-xl font-bold text-white">AI 면담 가이드</h2>
+                                        </div>
+                                        <p className="text-slate-400 text-sm">{d.empName} · {d.periodStr} · 종합 {d.overallScore > 0 ? d.overallScore.toFixed(1) + '점 (' + d.grade + '등급)' : '미평가'} · 프로젝트 {d.projectCount}건</p>
+                                    </div>
+                                    <button onClick={() => setAiInterviewModal({ isOpen: false, data: null })} className="p-2 text-slate-400 hover:text-white hover:bg-slate-700 rounded-lg transition">
+                                        <X size={20} />
+                                    </button>
+                                </div>
+                            </div>
+                            <div className="flex-1 overflow-y-auto px-6 py-6 space-y-8">
+                                {d.categoryScores.length > 0 && (
+                                    <div>
+                                        <h3 className="text-base font-bold text-white mb-3 flex items-center gap-2">📈 역량 분석 요약</h3>
+                                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                                            {d.categoryScores.map(c => (
+                                                <div key={c.key} className={`rounded-xl p-3.5 border ${c.score >= 7 ? 'bg-green-900/30 border-green-700/50' : c.score >= 5 ? 'bg-amber-900/30 border-amber-700/50' : 'bg-red-900/30 border-red-700/50'}`}>
+                                                    <p className="text-xs text-slate-400 mb-1">{c.label}</p>
+                                                    <p className={`text-2xl font-black ${c.score >= 7 ? 'text-green-400' : c.score >= 5 ? 'text-amber-400' : 'text-red-400'}`}>{c.score}</p>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+                                <div>
+                                    <h3 className="text-base font-bold text-white mb-3 flex items-center gap-2">💡 추천 면담 방식</h3>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                        {d.interviewMethods.map((m, idx) => (
+                                            <div key={idx} className="bg-slate-800 rounded-xl border border-slate-700 p-4 flex items-start gap-3">
+                                                <span className="text-2xl shrink-0">{m.icon}</span>
+                                                <div>
+                                                    <p className="text-white font-bold text-sm">{m.method}</p>
+                                                    <p className="text-slate-400 text-xs mt-1">{m.desc}</p>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                                <div>
+                                    <h3 className="text-base font-bold text-white mb-3 flex items-center gap-2">🗓️ 면담 프로세스 (약 30분)</h3>
+                                    <div className="relative">
+                                        <div className="absolute left-5 top-2 bottom-2 w-0.5 bg-slate-700"></div>
+                                        <div className="space-y-3">
+                                            {d.interviewProcess.map(step => (
+                                                <div key={step.step} className="flex items-start gap-4 relative">
+                                                    <div className="w-10 h-10 rounded-full bg-slate-800 border-2 border-purple-500/60 flex items-center justify-center text-purple-400 font-bold text-sm shrink-0 z-10">{step.step}</div>
+                                                    <div className="flex-1 bg-slate-800/60 rounded-lg p-3 border border-slate-700/50">
+                                                        <div className="flex items-center justify-between">
+                                                            <p className="text-white font-bold text-sm">{step.title}</p>
+                                                            <span className="text-slate-500 text-xs">{step.duration}</span>
+                                                        </div>
+                                                        <p className="text-slate-400 text-xs mt-0.5">{step.desc}</p>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                </div>
+                                <div>
+                                    <h3 className="text-base font-bold text-white mb-4 flex items-center gap-2">🎙️ 면담 스크립트</h3>
+                                    <div className="space-y-6">
+                                        {d.scripts.map(section => (
+                                            <div key={section.step} className="bg-slate-800/50 rounded-xl border border-slate-700/50 overflow-hidden">
+                                                <div className="px-5 py-3 bg-slate-800 border-b border-slate-700/50 flex items-center gap-2">
+                                                    <span className="text-lg">{section.icon}</span>
+                                                    <span className="text-white font-bold text-sm">Step {section.step}. {section.title}</span>
+                                                </div>
+                                                <div className="px-5 py-4 space-y-3">
+                                                    {section.lines.map((line, lineIdx) => (
+                                                        <div key={lineIdx} className={`flex gap-3 ${line.speaker === 'tip' ? 'mt-2' : ''}`}>
+                                                            {line.speaker === 'leader' && (
+                                                                <React.Fragment>
+                                                                    <div className="w-7 h-7 rounded-full bg-blue-600 flex items-center justify-center text-white text-xs font-bold shrink-0 mt-0.5">L</div>
+                                                                    <div className="flex-1 bg-blue-900/20 border border-blue-800/30 rounded-xl px-4 py-3">
+                                                                        <p className="text-slate-200 text-sm leading-relaxed">{line.text}</p>
+                                                                    </div>
+                                                                </React.Fragment>
+                                                            )}
+                                                            {line.speaker === 'tip' && (
+                                                                <div className="flex-1 ml-10 bg-amber-900/15 border border-amber-800/30 rounded-xl px-4 py-2.5 flex items-start gap-2">
+                                                                    <span className="text-amber-400 text-xs mt-0.5 shrink-0">💡 TIP</span>
+                                                                    <p className="text-amber-300/80 text-xs leading-relaxed">{line.text}</p>
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                                <div className="bg-red-900/15 border border-red-800/30 rounded-xl p-5">
+                                    <h3 className="text-sm font-bold text-red-400 mb-2">⚠️ 면담 시 주의사항</h3>
+                                    <div className="space-y-1.5 text-xs text-red-300/80">
+                                        <p>· 다른 직원과 비교하는 발언은 절대 하지 마세요.</p>
+                                        <p>· 인격이 아닌 업무 행동과 결과에 초점을 맞추세요.</p>
+                                        <p>· 직원이 말하는 동안 끊지 말고 충분히 경청하세요.</p>
+                                        <p>· 약속한 지원 사항은 반드시 이행하세요.</p>
+                                        <p>· 면담 내용은 기밀로 유지하고, 신뢰를 지켜주세요.</p>
+                                    </div>
+                                </div>
+                            </div>
+                            <div className="px-6 py-4 border-t border-slate-700 bg-slate-800/50 shrink-0 flex justify-end gap-3">
+                                <button onClick={() => setAiInterviewModal({ isOpen: false, data: null })} className="px-6 py-2 bg-blue-600 text-white rounded-lg text-sm font-bold hover:bg-blue-700 transition">
+                                    닫기
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                );
+            };
+
             const loadEmployeeForLeader = async (empId, rpId) => {
                 setIsLoading(true);
                 try {
@@ -1944,10 +2414,14 @@
                             else { grade = 'D'; gradeColor = 'text-red-400 bg-red-900/50'; }
                         }
 
+                        const empUser = userAccounts.find(u => u.employee_id === emp.id);
                         dashItems.push({
                             employee: emp,
                             reviewPeriod: rp,
+                            team: empUser?.team || '',
                             projectCount: (projects || []).length,
+                            projects: (projects || []),
+                            evals: (evals || []),
                             avgScore,
                             grade,
                             gradeColor,
@@ -1970,6 +2444,50 @@
                 } catch (err) {
                     console.error('Dashboard load error:', err);
                     setDashboardData([]);
+                }
+            };
+
+            // 대시보드 자동 로드: 첫 유입 시 최신 분기 자동 선택
+            useEffect(() => {
+                if (leaderActiveTab !== 'dashboard' || leaderMyDashboard) return;
+                if (dashboardAutoLoaded || dashboardQuarter) return;
+                if (!allReviewData || allReviewData.length === 0) return;
+                // allReviewData에서 submitted_at이 있는 최신 분기 찾기
+                const allPeriods = [];
+                allReviewData.forEach(({ periods }) => {
+                    (periods || []).forEach(pd => {
+                        if (pd.submitted_at) {
+                            allPeriods.push(pd);
+                        }
+                    });
+                });
+                if (allPeriods.length === 0) return;
+                // 최신 분기 정렬
+                allPeriods.sort((a, b) => {
+                    if (String(a.year) !== String(b.year)) return String(b.year).localeCompare(String(a.year));
+                    return b.quarter.localeCompare(a.quarter);
+                });
+                const latest = allPeriods[0];
+                setDashboardAutoLoaded(true);
+                setDashboardYear(Number(latest.year) || new Date().getFullYear());
+                loadDashboardData(String(latest.year), latest.quarter);
+            }, [leaderActiveTab, leaderMyDashboard, allReviewData, dashboardAutoLoaded, dashboardQuarter]);
+
+            // 팀 대시보드 아코디언 토글
+            const toggleDashboardExpand = (employeeId, projects, evals) => {
+                if (dashboardExpandedId === employeeId) {
+                    setDashboardExpandedId(null);
+                    setDashboardExpandedProjects([]);
+                } else {
+                    setDashboardExpandedId(employeeId);
+                    // evals를 project_id로 매핑
+                    const evalMap = {};
+                    (evals || []).forEach(ev => { evalMap[ev.project_id] = ev; });
+                    const projsWithEval = (projects || []).map(p => ({
+                        ...p,
+                        eval: evalMap[p.id] || null
+                    }));
+                    setDashboardExpandedProjects(projsWithEval);
                 }
             };
 
@@ -2258,7 +2776,7 @@
                                                         <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-0.5">
                                                             <p className="text-xs text-slate-500">작성일: {new Date(pd.created_at).toLocaleDateString('ko-KR')}</p>
                                                             {pd.submitted_at && <p className="text-xs text-slate-500">제출: {new Date(pd.submitted_at).toLocaleString('ko-KR', {month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'})}</p>}
-                                                            {pd.updated_at && <p className="text-xs text-amber-400">수정: {new Date(pd.updated_at).toLocaleString('ko-KR', {month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'})}</p>}
+                                                            {pd.updated_at && pd.submitted_at && new Date(pd.updated_at).getTime() !== new Date(pd.submitted_at).getTime() && Math.abs(new Date(pd.updated_at).getTime() - new Date(pd.submitted_at).getTime()) > 60000 && <p className="text-xs text-amber-400">수정: {new Date(pd.updated_at).toLocaleString('ko-KR', {month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'})}</p>}
                                                         </div>
                                                     </div>
                                                     <div className="flex items-center gap-2">
@@ -2331,30 +2849,56 @@
                                                         </div>
                                                         {avgScore && <span className="text-sm font-bold text-white">평균 <span className="text-blue-400">{avgScore}</span><span className="text-slate-500 text-xs"> / 10</span></span>}
                                                     </div>
-                                                    {/* Project List - table style */}
+                                                    {/* Project List - clickable accordion */}
                                                     <div className="divide-y divide-slate-700/50">
                                                         {projs.map((proj) => {
                                                             const ev = evalMap[proj.id];
                                                             const scores = ev ? [ev.score_speed, ev.score_quality, ev.score_comm, ev.score_accuracy].filter(Boolean) : [];
                                                             const projAvg = scores.length > 0 ? (scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(1) : null;
+                                                            const isProjExpanded = myDashExpandedProjId === proj.id;
                                                             return (
-                                                                <div key={proj.id} className="px-5 py-3 flex items-center gap-4">
-                                                                    <div className="flex-1 min-w-0">
-                                                                        <div className="flex items-center gap-2">
-                                                                            <span className="text-slate-200 text-sm font-medium truncate">{proj.name || '(이름 없음)'}</span>
-                                                                            {proj.contribution && <span className="text-[10px] px-1.5 py-0.5 bg-blue-900/40 text-blue-300 rounded shrink-0">{proj.contribution}</span>}
-                                                                        </div>
-                                                                        <span className="text-[11px] text-slate-500">{proj.act_start || '-'} ~ {proj.is_ongoing ? '진행중' : (proj.act_end || '-')}</span>
-                                                                    </div>
-                                                                    {projAvg ? (
-                                                                        <div className="flex items-center gap-2 shrink-0">
-                                                                            <div className="w-16 h-1.5 bg-slate-700 rounded-full overflow-hidden">
-                                                                                <div className="h-full rounded-full" style={{ width: `${(projAvg / 10) * 100}%`, backgroundColor: projAvg >= 8 ? '#22c55e' : projAvg >= 6 ? '#eab308' : '#ef4444' }}></div>
+                                                                <div key={proj.id}>
+                                                                    <div onClick={() => setMyDashExpandedProjId(isProjExpanded ? null : proj.id)} className={`px-5 py-3 flex items-center gap-4 cursor-pointer hover:bg-slate-700/30 transition ${isProjExpanded ? 'bg-slate-700/30' : ''}`}>
+                                                                        <div className="flex-1 min-w-0">
+                                                                            <div className="flex items-center gap-2">
+                                                                                <ChevronDown size={12} className={`text-slate-500 transition-transform duration-200 shrink-0 ${isProjExpanded ? 'rotate-180' : ''}`} />
+                                                                                <span className="text-slate-200 text-sm font-medium truncate">{proj.name || '(이름 없음)'}</span>
+                                                                                {proj.contribution && <span className="text-[10px] px-1.5 py-0.5 bg-blue-900/40 text-blue-300 rounded shrink-0">{proj.contribution}</span>}
                                                                             </div>
-                                                                            <span className="text-xs font-bold text-white w-6 text-right">{projAvg}</span>
+                                                                            <span className="text-[11px] text-slate-500 ml-5">{proj.act_start || '-'} ~ {proj.is_ongoing ? '진행중' : (proj.act_end || '-')}</span>
                                                                         </div>
-                                                                    ) : (
-                                                                        <span className="text-[10px] text-slate-600 shrink-0">미평가</span>
+                                                                        {projAvg ? (
+                                                                            <div className="flex items-center gap-2 shrink-0">
+                                                                                <div className="w-16 h-1.5 bg-slate-700 rounded-full overflow-hidden">
+                                                                                    <div className="h-full rounded-full" style={{ width: `${(projAvg / 10) * 100}%`, backgroundColor: projAvg >= 8 ? '#22c55e' : projAvg >= 6 ? '#eab308' : '#ef4444' }}></div>
+                                                                                </div>
+                                                                                <span className="text-xs font-bold text-white w-6 text-right">{projAvg}</span>
+                                                                            </div>
+                                                                        ) : (
+                                                                            <span className="text-[10px] text-slate-600 shrink-0">미평가</span>
+                                                                        )}
+                                                                    </div>
+                                                                    {isProjExpanded && (
+                                                                        <div className="bg-slate-900/50 px-6 py-4 border-t border-slate-700/30 animate-slideDown">
+                                                                            <div className="grid grid-cols-2 gap-x-6 gap-y-2.5 text-sm">
+                                                                                {proj.role && <div><span className="text-slate-500 text-xs">역할</span><p className="text-slate-200">{proj.role}</p></div>}
+                                                                                {proj.ops_status && <div><span className="text-slate-500 text-xs">운영 상태</span><p className="text-slate-200">{proj.ops_status}</p></div>}
+                                                                                {proj.kpi && <div className="col-span-2"><span className="text-slate-500 text-xs">KPI</span><p className="text-slate-200">{proj.kpi}</p></div>}
+                                                                                {proj.notes && <div className="col-span-2"><span className="text-slate-500 text-xs">비고</span><p className="text-slate-300">{proj.notes}</p></div>}
+                                                                            </div>
+                                                                            {ev && (
+                                                                                <div className="mt-3 pt-3 border-t border-slate-700/30">
+                                                                                    <p className="text-xs text-slate-400 font-bold mb-2">리더 평가</p>
+                                                                                    <div className="flex items-center gap-4 flex-wrap">
+                                                                                        {ev.score_speed && <div className="flex items-center gap-1.5"><span className="text-xs text-slate-400">속도</span><span className="text-sm font-bold text-white bg-slate-700/80 px-2.5 py-0.5 rounded-lg">{ev.score_speed}</span></div>}
+                                                                                        {ev.score_quality && <div className="flex items-center gap-1.5"><span className="text-xs text-slate-400">품질</span><span className="text-sm font-bold text-white bg-slate-700/80 px-2.5 py-0.5 rounded-lg">{ev.score_quality}</span></div>}
+                                                                                        {ev.score_comm && <div className="flex items-center gap-1.5"><span className="text-xs text-slate-400">소통</span><span className="text-sm font-bold text-white bg-slate-700/80 px-2.5 py-0.5 rounded-lg">{ev.score_comm}</span></div>}
+                                                                                        {ev.score_accuracy && <div className="flex items-center gap-1.5"><span className="text-xs text-slate-400">정확도</span><span className="text-sm font-bold text-white bg-slate-700/80 px-2.5 py-0.5 rounded-lg">{ev.score_accuracy}</span></div>}
+                                                                                    </div>
+                                                                                    {ev.notes && <p className="text-sm text-slate-400 mt-2 italic">"{ev.notes}"</p>}
+                                                                                </div>
+                                                                            )}
+                                                                        </div>
                                                                     )}
                                                                 </div>
                                                             );
@@ -2915,7 +3459,7 @@
                                                                         </div>
                                                                         <div className="flex flex-wrap gap-x-2 mt-1">
                                                                             {pd.submitted_at && <p className="text-slate-500 text-[10px]">제출: {new Date(pd.submitted_at).toLocaleString('ko-KR', {month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'})}</p>}
-                                                                            {pd.updated_at && <p className="text-amber-400 text-[10px]">수정: {new Date(pd.updated_at).toLocaleString('ko-KR', {month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'})}</p>}
+                                                                            {pd.updated_at && pd.submitted_at && Math.abs(new Date(pd.updated_at).getTime() - new Date(pd.submitted_at).getTime()) > 60000 && <p className="text-amber-400 text-[10px]">수정: {new Date(pd.updated_at).toLocaleString('ko-KR', {month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'})}</p>}
                                                                             {!pd.submitted_at && <p className="text-slate-500 text-[10px]">{new Date(pd.created_at).toLocaleDateString('ko-KR')}</p>}
                                                                         </div>
                                                                     </button>
@@ -3056,7 +3600,7 @@
                                                                     <div className="text-slate-400 text-xs">
                                                                         {pd.submitted_at ? new Date(pd.submitted_at).toLocaleString('ko-KR', {year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}) : new Date(pd.created_at).toLocaleDateString('ko-KR')}
                                                                     </div>
-                                                                    {pd.updated_at && <p className="text-amber-400 text-[10px] mt-0.5">수정: {new Date(pd.updated_at).toLocaleString('ko-KR', {month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'})}</p>}
+                                                                    {pd.updated_at && pd.submitted_at && Math.abs(new Date(pd.updated_at).getTime() - new Date(pd.submitted_at).getTime()) > 60000 && <p className="text-amber-400 text-[10px] mt-0.5">수정: {new Date(pd.updated_at).toLocaleString('ko-KR', {month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'})}</p>}
                                                                 </td>
                                                                 <td className="px-4 py-3 text-center">
                                                                     <div className="flex items-center justify-center gap-1">
@@ -3134,7 +3678,7 @@
                                                             <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-0.5">
                                                                 <p className="text-xs text-slate-500">작성일: {new Date(pd.created_at).toLocaleDateString('ko-KR')}</p>
                                                                 {pd.submitted_at && <p className="text-xs text-slate-500">제출: {new Date(pd.submitted_at).toLocaleString('ko-KR', {month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'})}</p>}
-                                                                {pd.updated_at && <p className="text-xs text-amber-400">수정: {new Date(pd.updated_at).toLocaleString('ko-KR', {month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'})}</p>}
+                                                                {pd.updated_at && pd.submitted_at && new Date(pd.updated_at).getTime() !== new Date(pd.submitted_at).getTime() && Math.abs(new Date(pd.updated_at).getTime() - new Date(pd.submitted_at).getTime()) > 60000 && <p className="text-xs text-amber-400">수정: {new Date(pd.updated_at).toLocaleString('ko-KR', {month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'})}</p>}
                                                             </div>
                                                         </div>
                                                         <div className="flex items-center gap-2">
@@ -3321,6 +3865,7 @@
                                                             <tr className="border-b border-slate-700">
                                                                 <th className="px-4 py-3 text-left text-xs font-bold text-slate-400 uppercase tracking-wider">순위</th>
                                                                 <th className="px-4 py-3 text-left text-xs font-bold text-slate-400 uppercase tracking-wider">직원</th>
+                                                                <th className="px-4 py-3 text-center text-xs font-bold text-slate-400 uppercase tracking-wider">소속 팀</th>
                                                                 <th className="px-4 py-3 text-center text-xs font-bold text-slate-400 uppercase tracking-wider">프로젝트</th>
                                                                 <th className="px-4 py-3 text-center text-xs font-bold text-slate-400 uppercase tracking-wider">점수</th>
                                                                 <th className="px-4 py-3 text-center text-xs font-bold text-slate-400 uppercase tracking-wider">등급</th>
@@ -3330,8 +3875,11 @@
                                                             </tr>
                                                         </thead>
                                                         <tbody className="divide-y divide-slate-700/50">
-                                                            {dashboardData.map((item, idx) => (
-                                                                <tr key={item.employee.id} className="hover:bg-slate-700/30 transition">
+                                                            {dashboardData.map((item, idx) => {
+                                                                const isExpanded = dashboardExpandedId === item.employee.id;
+                                                                return (
+                                                                <React.Fragment key={item.employee.id}>
+                                                                <tr onClick={() => toggleDashboardExpand(item.employee.id, item.projects, item.evals)} className={`hover:bg-slate-700/30 transition cursor-pointer ${isExpanded ? 'bg-slate-700/40' : ''}`}>
                                                                     <td className="px-4 py-4">
                                                                         <span className={`inline-flex items-center justify-center w-7 h-7 rounded-full text-xs font-black ${idx === 0 ? 'bg-yellow-500/20 text-yellow-400' : idx === 1 ? 'bg-slate-400/20 text-slate-300' : idx === 2 ? 'bg-amber-700/20 text-amber-500' : 'bg-slate-700/50 text-slate-500'}`}>
                                                                             {idx + 1}
@@ -3346,7 +3894,15 @@
                                                                                 <p className="text-white font-bold text-sm">{item.employee.name}</p>
                                                                                 <p className="text-slate-500 text-[10px]">{item.employee.emp_id}</p>
                                                                             </div>
+                                                                            <ChevronDown size={14} className={`text-slate-500 transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`} />
                                                                         </div>
+                                                                    </td>
+                                                                    <td className="px-4 py-4 text-center">
+                                                                        {item.team ? (
+                                                                            <span className={`text-xs font-bold px-2.5 py-1 rounded-full border ${item.team === '플랫폼개발팀' ? 'bg-indigo-900/50 text-indigo-300 border-indigo-700/50' : item.team === '데이터전략팀' ? 'bg-emerald-900/50 text-emerald-300 border-emerald-700/50' : item.team === 'DX팀' ? 'bg-orange-900/50 text-orange-300 border-orange-700/50' : 'bg-slate-700/50 text-slate-400 border-slate-600/50'}`}>{item.team}</span>
+                                                                        ) : (
+                                                                            <span className="text-slate-600 text-xs">-</span>
+                                                                        )}
                                                                     </td>
                                                                     <td className="px-4 py-4 text-center">
                                                                         <span className="text-slate-200 font-bold">{item.projectCount}</span>
@@ -3380,7 +3936,81 @@
                                                                         </div>
                                                                     </td>
                                                                 </tr>
-                                                            ))}
+                                                                {isExpanded && (
+                                                                <tr>
+                                                                    <td colSpan={9} className="px-0 py-0">
+                                                                        <div className="bg-slate-900/60 border-t border-slate-600/50 px-8 py-5 animate-slideDown">
+                                                                            <p className="text-sm font-bold text-slate-300 mb-4">프로젝트 상세 ({dashboardExpandedProjects.length}건)</p>
+                                                                            {dashboardExpandedProjects.length === 0 ? (
+                                                                                <p className="text-slate-400 text-sm py-2">등록된 프로젝트가 없습니다.</p>
+                                                                            ) : (
+                                                                                <div className="space-y-3">
+                                                                                    {dashboardExpandedProjects.map((proj) => {
+                                                                                        const ev = proj.eval;
+                                                                                        const scores = ev ? [ev.score_speed, ev.score_quality, ev.score_comm, ev.score_accuracy].filter(Boolean) : [];
+                                                                                        const projAvg = scores.length > 0 ? (scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(1) : null;
+                                                                                        return (
+                                                                                            <div key={proj.id} className="bg-slate-800/90 rounded-xl p-4 border border-slate-700/50">
+                                                                                                <div className="flex items-start justify-between gap-4 mb-3">
+                                                                                                    <div className="flex items-center gap-2.5 flex-wrap">
+                                                                                                        <span className="text-white text-base font-bold">{proj.name || '(이름 없음)'}</span>
+                                                                                                        {proj.role && <span className="text-xs px-2 py-0.5 bg-slate-700 text-slate-200 rounded-md font-medium">{proj.role}</span>}
+                                                                                                        {proj.contribution && <span className="text-xs px-2 py-0.5 bg-blue-900/50 text-blue-300 rounded-md font-medium">{proj.contribution}</span>}
+                                                                                                        {proj.ops_status && <span className="text-xs px-2 py-0.5 bg-amber-900/50 text-amber-300 rounded-md font-medium">{proj.ops_status}</span>}
+                                                                                                    </div>
+                                                                                                    <div className="shrink-0">
+                                                                                                        {projAvg ? (
+                                                                                                            <div className="flex items-center gap-2">
+                                                                                                                <div className="w-20 h-2 bg-slate-700 rounded-full overflow-hidden">
+                                                                                                                    <div className="h-full rounded-full" style={{ width: `${(projAvg / 10) * 100}%`, backgroundColor: projAvg >= 8 ? '#22c55e' : projAvg >= 6 ? '#eab308' : '#ef4444' }}></div>
+                                                                                                                </div>
+                                                                                                                <span className="text-sm font-bold text-white">{projAvg}</span>
+                                                                                                            </div>
+                                                                                                        ) : (
+                                                                                                            <span className="text-xs text-slate-500">미평가</span>
+                                                                                                        )}
+                                                                                                    </div>
+                                                                                                </div>
+                                                                                                <div className="grid grid-cols-2 lg:grid-cols-4 gap-x-6 gap-y-2 text-sm">
+                                                                                                    <div>
+                                                                                                        <span className="text-slate-500 text-xs">기간</span>
+                                                                                                        <p className="text-slate-200">{proj.act_start || proj.plan_start || '-'} ~ {proj.is_ongoing ? '진행중' : (proj.act_end || proj.plan_end || '-')}</p>
+                                                                                                    </div>
+                                                                                                    {proj.kpi && <div className="col-span-2 lg:col-span-3">
+                                                                                                        <span className="text-slate-500 text-xs">KPI</span>
+                                                                                                        <p className="text-slate-200">{proj.kpi}</p>
+                                                                                                    </div>}
+                                                                                                </div>
+                                                                                                {proj.notes && (
+                                                                                                    <div className="mt-2">
+                                                                                                        <span className="text-slate-500 text-xs">비고</span>
+                                                                                                        <p className="text-slate-300 text-sm mt-0.5">{proj.notes}</p>
+                                                                                                    </div>
+                                                                                                )}
+                                                                                                {ev && (
+                                                                                                    <div className="mt-3 pt-3 border-t border-slate-700/50">
+                                                                                                        <p className="text-xs text-slate-400 font-bold mb-2">리더 평가</p>
+                                                                                                        <div className="flex items-center gap-4 flex-wrap">
+                                                                                                            {ev.score_speed && <div className="flex items-center gap-1.5"><span className="text-xs text-slate-400">속도</span><span className="text-sm font-bold text-white bg-slate-700/80 px-2.5 py-0.5 rounded-lg">{ev.score_speed}</span></div>}
+                                                                                                            {ev.score_quality && <div className="flex items-center gap-1.5"><span className="text-xs text-slate-400">품질</span><span className="text-sm font-bold text-white bg-slate-700/80 px-2.5 py-0.5 rounded-lg">{ev.score_quality}</span></div>}
+                                                                                                            {ev.score_comm && <div className="flex items-center gap-1.5"><span className="text-xs text-slate-400">소통</span><span className="text-sm font-bold text-white bg-slate-700/80 px-2.5 py-0.5 rounded-lg">{ev.score_comm}</span></div>}
+                                                                                                            {ev.score_accuracy && <div className="flex items-center gap-1.5"><span className="text-xs text-slate-400">정확도</span><span className="text-sm font-bold text-white bg-slate-700/80 px-2.5 py-0.5 rounded-lg">{ev.score_accuracy}</span></div>}
+                                                                                                        </div>
+                                                                                                        {ev.notes && <p className="text-sm text-slate-400 mt-2 italic">"{ev.notes}"</p>}
+                                                                                                    </div>
+                                                                                                )}
+                                                                                            </div>
+                                                                                        );
+                                                                                    })}
+                                                                                </div>
+                                                                            )}
+                                                                        </div>
+                                                                    </td>
+                                                                </tr>
+                                                                )}
+                                                                </React.Fragment>
+                                                                );
+                                                            })}
                                                         </tbody>
                                                     </table>
                                                 </div>
@@ -3443,6 +4073,100 @@
                                                     </div>
                                                 </div>
                                             </div>
+
+                                            {/* 팀별 분석 대시보드 */}
+                                            {(() => {
+                                                const teams = ['플랫폼개발팀', '데이터전략팀', 'DX팀'];
+                                                const teamStats = teams.map(team => {
+                                                    const members = dashboardData.filter(d => d.team === team);
+                                                    const scored = members.filter(d => d.avgScore !== '-');
+                                                    const avgScore = scored.length > 0 ? (scored.reduce((a, b) => a + parseFloat(b.avgScore), 0) / scored.length).toFixed(1) : '-';
+                                                    const totalProjects = members.reduce((a, b) => a + b.projectCount, 0);
+                                                    const reviewedCount = members.filter(d => d.isReviewed).length;
+                                                    return { team, count: members.length, avgScore, totalProjects, reviewedCount, scored: scored.length };
+                                                }).filter(t => t.count > 0);
+
+                                                if (teamStats.length === 0) return null;
+
+                                                const teamColors = { '플랫폼개발팀': { bg: 'from-indigo-900/60 to-indigo-800/40', border: 'border-indigo-700/50', text: 'text-indigo-300', bar: 'bg-indigo-500' }, '데이터전략팀': { bg: 'from-emerald-900/60 to-emerald-800/40', border: 'border-emerald-700/50', text: 'text-emerald-300', bar: 'bg-emerald-500' }, 'DX팀': { bg: 'from-orange-900/60 to-orange-800/40', border: 'border-orange-700/50', text: 'text-orange-300', bar: 'bg-orange-500' } };
+
+                                                // 전체 평균 vs 팀별 비교용
+                                                const allScored = dashboardData.filter(d => d.avgScore !== '-');
+                                                const overallAvg = allScored.length > 0 ? (allScored.reduce((a, b) => a + parseFloat(b.avgScore), 0) / allScored.length).toFixed(1) : '-';
+
+                                                return (
+                                                    <div className="space-y-4 mt-6">
+                                                        {/* 팀별 평균 점수 비교 */}
+                                                        <div className="bg-slate-800 rounded-2xl border border-slate-700 p-6">
+                                                            <h3 className="text-base font-bold text-white mb-4">팀별 평균 점수</h3>
+                                                            <div className="space-y-4">
+                                                                {teamStats.map(ts => {
+                                                                    const c = teamColors[ts.team] || { bg: 'from-slate-800 to-slate-700', border: 'border-slate-600', text: 'text-slate-300', bar: 'bg-slate-500' };
+                                                                    const numScore = parseFloat(ts.avgScore) || 0;
+                                                                    return (
+                                                                        <div key={ts.team} className="flex items-center gap-4">
+                                                                            <span className={`text-sm font-bold w-28 shrink-0 ${c.text}`}>{ts.team}</span>
+                                                                            <div className="flex-1 bg-slate-700 rounded-full h-7 overflow-hidden relative">
+                                                                                <div className={`h-full ${c.bar} rounded-full transition-all duration-700 flex items-center justify-end pr-3`} style={{ width: `${Math.max(numScore * 10, 3)}%` }}>
+                                                                                    {numScore > 3 && <span className="text-white text-xs font-bold">{ts.avgScore}</span>}
+                                                                                </div>
+                                                                            </div>
+                                                                            <span className="text-slate-400 text-xs font-bold w-16 text-right shrink-0">{ts.count}명</span>
+                                                                        </div>
+                                                                    );
+                                                                })}
+                                                                {overallAvg !== '-' && (
+                                                                    <div className="pt-3 border-t border-slate-700 flex items-center gap-4">
+                                                                        <span className="text-sm font-bold w-28 shrink-0 text-slate-400">전체 평균</span>
+                                                                        <div className="flex-1 bg-slate-700 rounded-full h-7 overflow-hidden relative">
+                                                                            <div className="h-full bg-blue-500/60 rounded-full transition-all duration-700 flex items-center justify-end pr-3" style={{ width: `${Math.max(parseFloat(overallAvg) * 10, 3)}%` }}>
+                                                                                {parseFloat(overallAvg) > 3 && <span className="text-white text-xs font-bold">{overallAvg}</span>}
+                                                                            </div>
+                                                                        </div>
+                                                                        <span className="text-slate-400 text-xs font-bold w-16 text-right shrink-0">{dashboardData.length}명</span>
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        </div>
+
+                                                        {/* 팀별 현황 카드 */}
+                                                        <div className={`grid gap-4 ${teamStats.length >= 3 ? 'grid-cols-3' : teamStats.length === 2 ? 'grid-cols-2' : 'grid-cols-1'}`}>
+                                                            {teamStats.map(ts => {
+                                                                const c = teamColors[ts.team] || { bg: 'from-slate-800 to-slate-700', border: 'border-slate-600', text: 'text-slate-300', bar: 'bg-slate-500' };
+                                                                const reviewRate = ts.count > 0 ? Math.round((ts.reviewedCount / ts.count) * 100) : 0;
+                                                                const projPerPerson = ts.count > 0 ? (ts.totalProjects / ts.count).toFixed(1) : 0;
+                                                                return (
+                                                                    <div key={ts.team} className={`bg-gradient-to-br ${c.bg} rounded-2xl border ${c.border} p-5`}>
+                                                                        <p className={`text-sm font-bold ${c.text} mb-3`}>{ts.team}</p>
+                                                                        <div className="space-y-2">
+                                                                            <div className="flex justify-between items-center">
+                                                                                <span className="text-slate-400 text-xs">인원</span>
+                                                                                <span className="text-white font-bold text-sm">{ts.count}명</span>
+                                                                            </div>
+                                                                            <div className="flex justify-between items-center">
+                                                                                <span className="text-slate-400 text-xs">평균 점수</span>
+                                                                                <span className="text-white font-bold text-sm">{ts.avgScore !== '-' ? ts.avgScore + ' / 10' : '-'}</span>
+                                                                            </div>
+                                                                            <div className="flex justify-between items-center">
+                                                                                <span className="text-slate-400 text-xs">총 프로젝트</span>
+                                                                                <span className="text-white font-bold text-sm">{ts.totalProjects}건</span>
+                                                                            </div>
+                                                                            <div className="flex justify-between items-center">
+                                                                                <span className="text-slate-400 text-xs">1인당 프로젝트</span>
+                                                                                <span className="text-white font-bold text-sm">{projPerPerson}건</span>
+                                                                            </div>
+                                                                            <div className="flex justify-between items-center">
+                                                                                <span className="text-slate-400 text-xs">검토 완료율</span>
+                                                                                <span className="text-white font-bold text-sm">{reviewRate}%</span>
+                                                                            </div>
+                                                                        </div>
+                                                                    </div>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })()}
                                         </div>
                                     )}
                                     </>)}
@@ -3500,24 +4224,50 @@
                                                                     const ev = evalMap[proj.id];
                                                                     const scores = ev ? [ev.score_speed, ev.score_quality, ev.score_comm, ev.score_accuracy].filter(Boolean) : [];
                                                                     const projAvg = scores.length > 0 ? (scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(1) : null;
+                                                                    const isProjExpanded = myDashExpandedProjId === proj.id;
                                                                     return (
-                                                                        <div key={proj.id} className="px-5 py-3 flex items-center gap-4">
-                                                                            <div className="flex-1 min-w-0">
-                                                                                <div className="flex items-center gap-2">
-                                                                                    <span className="text-slate-200 text-sm font-medium truncate">{proj.name || '(이름 없음)'}</span>
-                                                                                    {proj.contribution && <span className="text-[10px] px-1.5 py-0.5 bg-blue-900/40 text-blue-300 rounded shrink-0">{proj.contribution}</span>}
-                                                                                </div>
-                                                                                <span className="text-[11px] text-slate-500">{proj.act_start || '-'} ~ {proj.is_ongoing ? '진행중' : (proj.act_end || '-')}</span>
-                                                                            </div>
-                                                                            {projAvg ? (
-                                                                                <div className="flex items-center gap-2 shrink-0">
-                                                                                    <div className="w-16 h-1.5 bg-slate-700 rounded-full overflow-hidden">
-                                                                                        <div className="h-full rounded-full" style={{ width: `${(projAvg / 10) * 100}%`, backgroundColor: projAvg >= 8 ? '#22c55e' : projAvg >= 6 ? '#eab308' : '#ef4444' }}></div>
+                                                                        <div key={proj.id}>
+                                                                            <div onClick={() => setMyDashExpandedProjId(isProjExpanded ? null : proj.id)} className={`px-5 py-3 flex items-center gap-4 cursor-pointer hover:bg-slate-700/30 transition ${isProjExpanded ? 'bg-slate-700/30' : ''}`}>
+                                                                                <div className="flex-1 min-w-0">
+                                                                                    <div className="flex items-center gap-2">
+                                                                                        <ChevronDown size={12} className={`text-slate-500 transition-transform duration-200 shrink-0 ${isProjExpanded ? 'rotate-180' : ''}`} />
+                                                                                        <span className="text-slate-200 text-sm font-medium truncate">{proj.name || '(이름 없음)'}</span>
+                                                                                        {proj.contribution && <span className="text-[10px] px-1.5 py-0.5 bg-blue-900/40 text-blue-300 rounded shrink-0">{proj.contribution}</span>}
                                                                                     </div>
-                                                                                    <span className="text-xs font-bold text-white w-6 text-right">{projAvg}</span>
+                                                                                    <span className="text-[11px] text-slate-500 ml-5">{proj.act_start || '-'} ~ {proj.is_ongoing ? '진행중' : (proj.act_end || '-')}</span>
                                                                                 </div>
-                                                                            ) : (
-                                                                                <span className="text-[10px] text-slate-600 shrink-0">미평가</span>
+                                                                                {projAvg ? (
+                                                                                    <div className="flex items-center gap-2 shrink-0">
+                                                                                        <div className="w-16 h-1.5 bg-slate-700 rounded-full overflow-hidden">
+                                                                                            <div className="h-full rounded-full" style={{ width: `${(projAvg / 10) * 100}%`, backgroundColor: projAvg >= 8 ? '#22c55e' : projAvg >= 6 ? '#eab308' : '#ef4444' }}></div>
+                                                                                        </div>
+                                                                                        <span className="text-xs font-bold text-white w-6 text-right">{projAvg}</span>
+                                                                                    </div>
+                                                                                ) : (
+                                                                                    <span className="text-[10px] text-slate-600 shrink-0">미평가</span>
+                                                                                )}
+                                                                            </div>
+                                                                            {isProjExpanded && (
+                                                                                <div className="bg-slate-900/50 px-6 py-4 border-t border-slate-700/30 animate-slideDown">
+                                                                                    <div className="grid grid-cols-2 gap-x-6 gap-y-2.5 text-sm">
+                                                                                        {proj.role && <div><span className="text-slate-500 text-xs">역할</span><p className="text-slate-200">{proj.role}</p></div>}
+                                                                                        {proj.ops_status && <div><span className="text-slate-500 text-xs">운영 상태</span><p className="text-slate-200">{proj.ops_status}</p></div>}
+                                                                                        {proj.kpi && <div className="col-span-2"><span className="text-slate-500 text-xs">KPI</span><p className="text-slate-200">{proj.kpi}</p></div>}
+                                                                                        {proj.notes && <div className="col-span-2"><span className="text-slate-500 text-xs">비고</span><p className="text-slate-300">{proj.notes}</p></div>}
+                                                                                    </div>
+                                                                                    {ev && (
+                                                                                        <div className="mt-3 pt-3 border-t border-slate-700/30">
+                                                                                            <p className="text-xs text-slate-400 font-bold mb-2">리더 평가</p>
+                                                                                            <div className="flex items-center gap-4 flex-wrap">
+                                                                                                {ev.score_speed && <div className="flex items-center gap-1.5"><span className="text-xs text-slate-400">속도</span><span className="text-sm font-bold text-white bg-slate-700/80 px-2.5 py-0.5 rounded-lg">{ev.score_speed}</span></div>}
+                                                                                                {ev.score_quality && <div className="flex items-center gap-1.5"><span className="text-xs text-slate-400">품질</span><span className="text-sm font-bold text-white bg-slate-700/80 px-2.5 py-0.5 rounded-lg">{ev.score_quality}</span></div>}
+                                                                                                {ev.score_comm && <div className="flex items-center gap-1.5"><span className="text-xs text-slate-400">소통</span><span className="text-sm font-bold text-white bg-slate-700/80 px-2.5 py-0.5 rounded-lg">{ev.score_comm}</span></div>}
+                                                                                                {ev.score_accuracy && <div className="flex items-center gap-1.5"><span className="text-xs text-slate-400">정확도</span><span className="text-sm font-bold text-white bg-slate-700/80 px-2.5 py-0.5 rounded-lg">{ev.score_accuracy}</span></div>}
+                                                                                            </div>
+                                                                                            {ev.notes && <p className="text-sm text-slate-400 mt-2 italic">"{ev.notes}"</p>}
+                                                                                        </div>
+                                                                                    )}
+                                                                                </div>
                                                                             )}
                                                                         </div>
                                                                     );
@@ -4184,6 +4934,11 @@
                                 <div className="flex items-center gap-4">
                                     <span className="text-sm font-bold text-white">{importedData.name} - {period.year} {period.quarter}</span>
                                     <div className="flex gap-2 no-print">
+                                        {currentUser?.role === 'leader' && (
+                                            <button onClick={generateAiInterview} className="flex items-center gap-2 px-3 py-2 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-lg hover:from-purple-700 hover:to-blue-700 transition text-sm font-bold shadow-lg">
+                                                <Activity size={16} /> AI 면담
+                                            </button>
+                                        )}
                                         <button onClick={downloadLeaderJPG} className="flex items-center gap-2 px-3 py-2 bg-slate-700 text-slate-200 rounded-lg hover:bg-slate-600 transition text-sm font-medium">
                                             <DownloadImage size={16} /> JPG 다운로드
                                         </button>
@@ -4234,6 +4989,8 @@
                         </div>
 
                         <ConfirmModal isOpen={modal.isOpen} title={modal.title} message={modal.message} type={modal.type} onConfirm={modal.action} onCancel={closeModal} />
+
+                        {renderAiInterviewModal()}
                     </div>
                 );
             }
@@ -4274,9 +5031,16 @@
                                     </button>
                                 </div>
                                 <h1 className="text-lg font-bold text-white">리포트</h1>
-                                <button onClick={downloadReportImage} className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition text-sm font-bold">
-                                    <Printer size={16} /> 리포트 출력 (PDF)
-                                </button>
+                                <div className="flex gap-2">
+                                    {currentUser?.role === 'leader' && (
+                                        <button onClick={generateAiInterview} className="flex items-center gap-1.5 px-4 py-2 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-lg hover:from-purple-700 hover:to-blue-700 transition text-sm font-bold shadow-lg">
+                                            <Activity size={16} /> AI 면담
+                                        </button>
+                                    )}
+                                    <button onClick={downloadReportImage} className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition text-sm font-bold">
+                                        <Printer size={16} /> 리포트 출력 (PDF)
+                                    </button>
+                                </div>
                             </div>
                         </div>
 
@@ -4395,6 +5159,7 @@
                         </div>
 
                         <ConfirmModal isOpen={modal.isOpen} title={modal.title} message={modal.message} type={modal.type} onConfirm={modal.action} onCancel={closeModal} />
+                        {renderAiInterviewModal()}
                     </div>
                 );
             }
