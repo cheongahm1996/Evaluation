@@ -1444,7 +1444,16 @@
                 }
             };
 
-            // Load accounts when switching to accounts tab
+            // Load accounts on login (for team display) and when switching to accounts tab
+            useEffect(() => {
+                if ((currentUser?.role === 'leader' || currentUser?.role === 'admin') && dbConnected) {
+                    supabaseClient.from('users').select('*').order('name').then(({ data }) => {
+                        setUserAccounts(data || []);
+                    });
+                }
+            }, [currentUser, dbConnected]);
+
+            // Refresh accounts when switching to accounts tab
             useEffect(() => {
                 if (leaderActiveTab === 'accounts' && currentUser?.role === 'leader') {
                     supabaseClient.from('users').select('*').order('name').then(({ data }) => {
