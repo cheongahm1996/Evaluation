@@ -1186,6 +1186,7 @@
             const [dashboardExpandedId, setDashboardExpandedId] = useState(null); // 팀 대시보드 아코디언
             const [dashboardExpandedProjects, setDashboardExpandedProjects] = useState([]); // 확장된 직원의 프로젝트 목록
             const [myDashExpandedProjId, setMyDashExpandedProjId] = useState(null); // 내 대시보드 프로젝트 아코디언
+            const [reportExpandedProjIdx, setReportExpandedProjIdx] = useState(null); // 리포트 프로젝트 아코디언
             const [dashboardAutoLoaded, setDashboardAutoLoaded] = useState(false); // 자동 로드 여부
             const [projectViewMode, setProjectViewMode] = useState('card'); // 'card' or 'table'
             const [projectFilter, setProjectFilter] = useState('all'); // 'all' or '2025-4분기' etc.
@@ -3948,7 +3949,8 @@
                                                                 {isExpanded && (
                                                                 <tr>
                                                                     <td colSpan={9} className="px-0 py-0">
-                                                                        <div className="bg-slate-900/60 border-t border-slate-600/50 px-8 py-5 animate-slideDown">
+                                                                        <div className="bg-slate-900/60 border-t border-slate-600/50 animate-slideDown">
+                                                                          <div style={{maxHeight: '420px', overflowY: 'auto', padding: '20px 32px'}}>
                                                                             <p className="text-sm font-bold text-slate-300 mb-4">프로젝트 상세 ({dashboardExpandedProjects.length}건)</p>
                                                                             {dashboardExpandedProjects.length === 0 ? (
                                                                                 <p className="text-slate-400 text-sm py-2">등록된 프로젝트가 없습니다.</p>
@@ -4013,6 +4015,7 @@
                                                                                     })}
                                                                                 </div>
                                                                             )}
+                                                                          </div>
                                                                         </div>
                                                                     </td>
                                                                 </tr>
@@ -5122,6 +5125,12 @@
                                             <p className="text-sm text-slate-300 leading-relaxed whitespace-pre-wrap">{compData.improvements || '내용 없음'}</p>
                                         </div>
                                     </div>
+                                    <div>
+                                        <p className="flex items-center gap-2 text-sm font-bold text-cyan-400 mb-2"><Target size={16} /> 커리어 레벨에 대한 의견</p>
+                                        <div className="bg-slate-700/50 rounded-xl p-4 min-h-[40px]">
+                                            <p className="text-sm text-slate-300 leading-relaxed whitespace-pre-wrap">{compData.levelOpinion || '내용 없음'}</p>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
 
@@ -5139,28 +5148,61 @@
                                     const evalData = leaderEval[idx];
                                     const avg = calculateAverage(evalData);
                                     const projGrade = getGrade(avg);
+                                    const isReportExpanded = reportExpandedProjIdx === idx;
                                     return (
-                                        <div key={proj.id || idx} className="grid grid-cols-12 py-4 border-b border-slate-700 last:border-b-0 items-start">
-                                            <div className="col-span-6">
-                                                <p className="font-bold text-white text-sm">{proj.name || '-'}</p>
-                                                <p className="text-slate-400 text-xs mt-0.5">
-                                                    {proj.actStart || '-'} ~ {proj.isOngoing ? '진행중' : (proj.actEnd || '-')}
-                                                    {' '}
-                                                    <span className="text-blue-400 font-bold">{getDurationText(proj.actStart, proj.isOngoing ? new Date() : proj.actEnd)}</span>
-                                                </p>
-                                                <div className="flex flex-wrap gap-1 mt-1.5">
-                                                    {proj.role && <span className="inline-block px-1.5 py-0.5 bg-slate-700 text-slate-300 text-[10px] font-medium rounded">{proj.role}</span>}
-                                                    {proj.contribution && <span className="inline-block px-1.5 py-0.5 bg-blue-900/50 text-blue-300 text-[10px] font-bold rounded border border-blue-800">{proj.contribution}</span>}
-                                                    {proj.opsStatus && <span className="inline-block px-1.5 py-0.5 bg-amber-900/50 text-amber-300 text-[10px] font-medium rounded border border-amber-800">{proj.opsStatus.split('(')[0]}</span>}
+                                        <div key={proj.id || idx}>
+                                            <div className="grid grid-cols-12 py-4 border-b border-slate-700 last:border-b-0 items-start cursor-pointer hover:bg-slate-700/30 transition rounded-lg px-2" onClick={() => setReportExpandedProjIdx(isReportExpanded ? null : idx)}>
+                                                <div className="col-span-6">
+                                                    <div className="flex items-center gap-2">
+                                                        <p className="font-bold text-white text-sm">{proj.name || '-'}</p>
+                                                        <ChevronDown size={14} className={`text-slate-400 transition-transform ${isReportExpanded ? 'rotate-180' : ''}`} />
+                                                    </div>
+                                                    <p className="text-slate-400 text-xs mt-0.5">
+                                                        {proj.actStart || '-'} ~ {proj.isOngoing ? '진행중' : (proj.actEnd || '-')}
+                                                        {' '}
+                                                        <span className="text-blue-400 font-bold">{getDurationText(proj.actStart, proj.isOngoing ? new Date() : proj.actEnd)}</span>
+                                                    </p>
+                                                    <div className="flex flex-wrap gap-1 mt-1.5">
+                                                        {proj.role && <span className="inline-block px-1.5 py-0.5 bg-slate-700 text-slate-300 text-[10px] font-medium rounded">{proj.role}</span>}
+                                                        {proj.contribution && <span className="inline-block px-1.5 py-0.5 bg-blue-900/50 text-blue-300 text-[10px] font-bold rounded border border-blue-800">{proj.contribution}</span>}
+                                                        {proj.opsStatus && <span className="inline-block px-1.5 py-0.5 bg-amber-900/50 text-amber-300 text-[10px] font-medium rounded border border-amber-800">{proj.opsStatus.split('(')[0]}</span>}
+                                                    </div>
+                                                </div>
+                                                <div className="col-span-3 text-center text-xs text-slate-300 pt-1">
+                                                    {proj.kpi || '-'}
+                                                </div>
+                                                <div className="col-span-3 text-right">
+                                                    <p className="text-xl font-black text-white">{avg}</p>
+                                                    <span className={`inline-block mt-0.5 px-2 py-0.5 rounded text-[10px] font-bold ${projGrade === 'S' ? 'bg-purple-900/50 text-purple-300' : projGrade === 'A' ? 'bg-green-900/50 text-green-300' : 'bg-slate-700 text-slate-300'}`}>{projGrade}</span>
                                                 </div>
                                             </div>
-                                            <div className="col-span-3 text-center text-xs text-slate-300 pt-1">
-                                                {proj.kpi || '-'}
-                                            </div>
-                                            <div className="col-span-3 text-right">
-                                                <p className="text-xl font-black text-white">{avg}</p>
-                                                <span className={`inline-block mt-0.5 px-2 py-0.5 rounded text-[10px] font-bold ${projGrade === 'S' ? 'bg-purple-900/50 text-purple-300' : projGrade === 'A' ? 'bg-green-900/50 text-green-300' : 'bg-slate-700 text-slate-300'}`}>{projGrade}</span>
-                                            </div>
+                                            {isReportExpanded && evalData && (
+                                                <div className="animate-slideDown bg-slate-900/50 rounded-xl mx-2 mb-3 p-4 border border-slate-700/50">
+                                                    <p className="text-xs font-bold text-slate-400 mb-3 uppercase tracking-wider">리더 피드백 세부 점수</p>
+                                                    <div className="grid grid-cols-4 gap-3 mb-4">
+                                                        {[
+                                                            { label: '업무 속도', value: evalData.scoreSpeed, color: 'blue' },
+                                                            { label: '업무 퀄리티', value: evalData.scoreQuality, color: 'green' },
+                                                            { label: '커뮤니케이션', value: evalData.scoreComm, color: 'purple' },
+                                                            { label: '정확성/신뢰도', value: evalData.scoreAccuracy, color: 'amber' }
+                                                        ].map((item, i) => (
+                                                            <div key={i} className="bg-slate-800 rounded-lg p-3 text-center border border-slate-700">
+                                                                <p className={`text-[10px] font-bold text-${item.color}-400 mb-1`}>{item.label}</p>
+                                                                <p className="text-lg font-black text-white">{item.value || '-'}</p>
+                                                                <p className="text-[10px] text-slate-500">/ 10</p>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                    {evalData.notes && (
+                                                        <div>
+                                                            <p className="text-xs font-bold text-slate-400 mb-2">리더 코멘트</p>
+                                                            <div className="bg-slate-800 rounded-lg p-3 border border-slate-700">
+                                                                <p className="text-sm text-slate-300 leading-relaxed whitespace-pre-wrap">{evalData.notes}</p>
+                                                            </div>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            )}
                                         </div>
                                     );
                                 })}
