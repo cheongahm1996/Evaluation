@@ -1361,7 +1361,13 @@
             const [aiInterviewModal, setAiInterviewModal] = useState({ isOpen: false, data: null });
 
             useEffect(() => {
-                SupabaseAPI.testConnection().then(ok => setDbConnected(ok));
+                SupabaseAPI.testConnection().then(ok => {
+                    setDbConnected(ok);
+                    // last_login_at 컬럼이 없으면 추가 시도 (Supabase SQL Editor에서 수동 추가 권장)
+                    if (ok && supabaseClient) {
+                        supabaseClient.rpc('exec_sql', { query: "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at timestamptz;" }).then(() => {}).catch(e => {});
+                    }
+                });
             }, []);
 
             const closeModal = () => setModal({ ...modal, isOpen: false });
@@ -1385,7 +1391,9 @@
                         return;
                     }
 
-                    setCurrentUser(user);
+                    // 마지막 접속 일시 업데이트
+                    supabaseClient.from('users').update({ last_login_at: new Date().toISOString() }).eq('id', user.id).then(() => {}).catch(e => {});
+                    setCurrentUser({ ...user, last_login_at: new Date().toISOString() });
                     setLoginError('');
                     try { localStorage.setItem('pc_last_login_id', loginId); } catch(e) {}
 
@@ -4485,6 +4493,7 @@
                                                     <th className="px-4 py-3 text-right text-xs font-bold text-slate-500 uppercase">연봉</th>
                                                     <th className="px-4 py-3 text-center text-xs font-bold text-slate-500 uppercase">상태</th>
                                                     <th className="px-4 py-3 text-center text-xs font-bold text-slate-500 uppercase">비밀번호</th>
+                                                    <th className="px-4 py-3 text-center text-xs font-bold text-slate-500 uppercase">마지막 접속</th>
                                                     <th className="px-4 py-3 text-center text-xs font-bold text-slate-500 uppercase">관리</th>
                                                 </tr>
                                             </thead>
@@ -4522,6 +4531,14 @@
                                                                 </td>
                                                                 <td className="px-4 py-3 text-center">
                                                                     {u.must_change_password ? <span className="text-xs text-orange-600 font-bold">변경필요</span> : <span className="text-xs text-slate-400">설정됨</span>}
+                                                                </td>
+                                                                <td className="px-4 py-3 text-center">
+                                                                    {u.last_login_at ? (
+                                                                        <div>
+                                                                            <p className="text-xs text-slate-700 font-medium">{new Date(u.last_login_at).toLocaleDateString('ko-KR')}</p>
+                                                                            <p className="text-[10px] text-slate-400">{new Date(u.last_login_at).toLocaleTimeString('ko-KR', {hour:'2-digit', minute:'2-digit'})}</p>
+                                                                        </div>
+                                                                    ) : <span className="text-[10px] text-slate-400">-</span>}
                                                                 </td>
                                                                 <td className="px-4 py-3 text-center">
                                                                     <div className="flex gap-1 justify-center">
@@ -4563,6 +4580,14 @@
                                                                 </td>
                                                                 <td className="px-4 py-3 text-center">
                                                                     {u.must_change_password ? <span className="text-xs text-orange-600 font-bold">변경필요</span> : <span className="text-xs text-slate-400">설정됨</span>}
+                                                                </td>
+                                                                <td className="px-4 py-3 text-center">
+                                                                    {u.last_login_at ? (
+                                                                        <div>
+                                                                            <p className="text-xs text-slate-700 font-medium">{new Date(u.last_login_at).toLocaleDateString('ko-KR')}</p>
+                                                                            <p className="text-[10px] text-slate-400">{new Date(u.last_login_at).toLocaleTimeString('ko-KR', {hour:'2-digit', minute:'2-digit'})}</p>
+                                                                        </div>
+                                                                    ) : <span className="text-[10px] text-slate-400">-</span>}
                                                                 </td>
                                                                 <td className="px-4 py-3 text-center">
                                                                     <div className="flex gap-1 justify-center">
