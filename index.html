@@ -441,6 +441,11 @@
                 if (error) { console.error('createCountdown error:', error); return null; }
                 return data;
             },
+            async updateCountdown(countdownId, title, deadline) {
+                const { data, error } = await supabaseClient.from('countdown_settings').update({ title, deadline, updated_at: new Date().toISOString() }).eq('id', countdownId).select().maybeSingle();
+                if (error) { console.error('updateCountdown error:', error); return null; }
+                return data;
+            },
             async stopCountdown(countdownId) {
                 const { error } = await supabaseClient.from('countdown_settings').update({ is_active: false, updated_at: new Date().toISOString() }).eq('id', countdownId);
                 if (error) console.error('stopCountdown error:', error);
@@ -3282,26 +3287,45 @@
                         </div>
 
                         <div className="max-w-6xl mx-auto px-4 py-8">
-                            <div className="flex gap-2 mb-8 border-b border-slate-700">
-                                <button onClick={() => setLeaderActiveTab('employees')} className={`px-6 py-3 font-bold border-b-2 transition ${leaderActiveTab === 'employees' ? 'text-white border-b-blue-600' : 'text-slate-400 border-b-transparent hover:text-slate-200'}`}>
-                                    프로젝트
-                                </button>
-                                <button onClick={() => setLeaderActiveTab('myprojects')} className={`px-6 py-3 font-bold border-b-2 transition ${leaderActiveTab === 'myprojects' ? 'text-white border-b-blue-600' : 'text-slate-400 border-b-transparent hover:text-slate-200'}`}>
-                                    내 프로젝트
-                                </button>
-                                <button onClick={() => setLeaderActiveTab('dashboard')} className={`px-6 py-3 font-bold border-b-2 transition ${leaderActiveTab === 'dashboard' ? 'text-white border-b-blue-600' : 'text-slate-400 border-b-transparent hover:text-slate-200'}`}>
-                                    대시보드
-                                </button>
-                                <button onClick={() => setLeaderActiveTab('templates')} className={`px-6 py-3 font-bold border-b-2 transition ${leaderActiveTab === 'templates' ? 'text-white border-b-blue-600' : 'text-slate-400 border-b-transparent hover:text-slate-200'}`}>
-                                    템플릿
-                                </button>
-                                <button onClick={() => setLeaderActiveTab('memos')} className={`px-6 py-3 font-bold border-b-2 transition ${leaderActiveTab === 'memos' ? 'text-white border-b-blue-600' : 'text-slate-400 border-b-transparent hover:text-slate-200'}`}>
-                                    메모
-                                </button>
-                                {currentUser?.role === 'leader' && (
-                                    <button onClick={() => setLeaderActiveTab('accounts')} className={`px-6 py-3 font-bold border-b-2 transition ${leaderActiveTab === 'accounts' ? 'text-white border-b-blue-600' : 'text-slate-400 border-b-transparent hover:text-slate-200'}`}>
-                                        계정 관리
+                            <div className="flex items-center mb-8 border-b border-slate-700">
+                                <div className="flex gap-2">
+                                    <button onClick={() => setLeaderActiveTab('employees')} className={`px-6 py-3 font-bold border-b-2 transition ${leaderActiveTab === 'employees' ? 'text-white border-b-blue-600' : 'text-slate-400 border-b-transparent hover:text-slate-200'}`}>
+                                        프로젝트
                                     </button>
+                                    <button onClick={() => setLeaderActiveTab('myprojects')} className={`px-6 py-3 font-bold border-b-2 transition ${leaderActiveTab === 'myprojects' ? 'text-white border-b-blue-600' : 'text-slate-400 border-b-transparent hover:text-slate-200'}`}>
+                                        내 프로젝트
+                                    </button>
+                                    <button onClick={() => setLeaderActiveTab('dashboard')} className={`px-6 py-3 font-bold border-b-2 transition ${leaderActiveTab === 'dashboard' ? 'text-white border-b-blue-600' : 'text-slate-400 border-b-transparent hover:text-slate-200'}`}>
+                                        대시보드
+                                    </button>
+                                    <button onClick={() => setLeaderActiveTab('templates')} className={`px-6 py-3 font-bold border-b-2 transition ${leaderActiveTab === 'templates' ? 'text-white border-b-blue-600' : 'text-slate-400 border-b-transparent hover:text-slate-200'}`}>
+                                        템플릿
+                                    </button>
+                                    <button onClick={() => setLeaderActiveTab('memos')} className={`px-6 py-3 font-bold border-b-2 transition ${leaderActiveTab === 'memos' ? 'text-white border-b-blue-600' : 'text-slate-400 border-b-transparent hover:text-slate-200'}`}>
+                                        메모
+                                    </button>
+                                    {currentUser?.role === 'leader' && (
+                                        <button onClick={() => setLeaderActiveTab('accounts')} className={`px-6 py-3 font-bold border-b-2 transition ${leaderActiveTab === 'accounts' ? 'text-white border-b-blue-600' : 'text-slate-400 border-b-transparent hover:text-slate-200'}`}>
+                                            계정 관리
+                                        </button>
+                                    )}
+                                </div>
+                                {countdownData && countdownData.is_active && countdownRemaining && (
+                                    <div className="ml-auto flex-shrink-0 text-right px-4 py-1.5">
+                                        <p className="text-[11px] font-bold text-amber-400 leading-tight">{countdownData.title}</p>
+                                        {countdownRemaining.expired ? (
+                                            <p className="text-xs font-bold text-red-400">마감됨</p>
+                                        ) : (
+                                            <p className="text-sm font-black text-white tabular-nums leading-tight">
+                                                {countdownRemaining.days > 0 && <span>{countdownRemaining.days}<span className="text-[10px] font-medium text-slate-400">일 </span></span>}
+                                                {String(countdownRemaining.hours).padStart(2,'0')}
+                                                <span className="text-amber-400">:</span>
+                                                {String(countdownRemaining.minutes).padStart(2,'0')}
+                                                <span className="text-amber-400">:</span>
+                                                {String(countdownRemaining.seconds).padStart(2,'0')}
+                                            </p>
+                                        )}
+                                    </div>
                                 )}
                             </div>
 
@@ -4599,14 +4623,28 @@
                                                                 <p className="text-sm text-red-600 font-bold mt-2">마감 시간이 지났습니다</p>
                                                             )}
                                                         </div>
-                                                        <button onClick={async () => {
-                                                            if (!confirm('카운트를 중지하시겠습니까? 팀원 페이지에서 카운트가 숨겨집니다.')) return;
-                                                            await SupabaseAPI.stopCountdown(countdownData.id);
-                                                            setCountdownData(null);
-                                                            setCountdownRemaining(null);
-                                                        }} className="px-4 py-2.5 bg-red-500 text-white rounded-lg text-sm font-bold hover:bg-red-600 transition flex items-center gap-1.5">
-                                                            <StopCircle size={16} /> 중지
-                                                        </button>
+                                                        <div className="flex flex-col gap-2">
+                                                            <button onClick={() => {
+                                                                const dl = new Date(countdownData.deadline);
+                                                                setCountdownModal({
+                                                                    isOpen: true,
+                                                                    editId: countdownData.id,
+                                                                    title: countdownData.title || '',
+                                                                    date: dl.getFullYear() + '-' + String(dl.getMonth()+1).padStart(2,'0') + '-' + String(dl.getDate()).padStart(2,'0'),
+                                                                    time: String(dl.getHours()).padStart(2,'0') + ':' + String(dl.getMinutes()).padStart(2,'0')
+                                                                });
+                                                            }} className="px-4 py-2.5 bg-blue-500 text-white rounded-lg text-sm font-bold hover:bg-blue-600 transition flex items-center gap-1.5">
+                                                                <Edit size={16} /> 수정
+                                                            </button>
+                                                            <button onClick={async () => {
+                                                                if (!confirm('카운트를 중지하시겠습니까? 팀원 페이지에서 카운트가 숨겨집니다.')) return;
+                                                                await SupabaseAPI.stopCountdown(countdownData.id);
+                                                                setCountdownData(null);
+                                                                setCountdownRemaining(null);
+                                                            }} className="px-4 py-2.5 bg-red-500 text-white rounded-lg text-sm font-bold hover:bg-red-600 transition flex items-center gap-1.5">
+                                                                <StopCircle size={16} /> 중지
+                                                            </button>
+                                                        </div>
                                                     </div>
                                                 </div>
                                             ) : (
@@ -4623,8 +4661,8 @@
                             {countdownModal.isOpen && (
                                 <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={() => setCountdownModal({...countdownModal, isOpen: false})}>
                                     <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6" onClick={e => e.stopPropagation()}>
-                                        <h3 className="text-lg font-bold text-slate-800 mb-1 flex items-center gap-2"><Clock size={20} className="text-amber-500" /> 카운트 설정</h3>
-                                        <p className="text-xs text-slate-500 mb-5">설정한 마감 시간까지 팀원 페이지에 카운트다운이 표시됩니다.</p>
+                                        <h3 className="text-lg font-bold text-slate-800 mb-1 flex items-center gap-2"><Clock size={20} className="text-amber-500" /> {countdownModal.editId ? '카운트 수정' : '카운트 설정'}</h3>
+                                        <p className="text-xs text-slate-500 mb-5">{countdownModal.editId ? '카운트다운 타이틀과 마감 시간을 수정합니다.' : '설정한 마감 시간까지 팀원 페이지에 카운트다운이 표시됩니다.'}</p>
                                         <div className="space-y-4">
                                             <div>
                                                 <label className="text-xs font-bold text-slate-500 mb-1 block">타이틀</label>
@@ -4651,16 +4689,27 @@
                                                 if (!countdownModal.date || !countdownModal.time) { alert('마감 일자와 시간을 입력하세요.'); return; }
                                                 const deadline = new Date(`${countdownModal.date}T${countdownModal.time}:00`);
                                                 if (isNaN(deadline.getTime())) { alert('올바른 날짜/시간을 입력하세요.'); return; }
-                                                const result = await SupabaseAPI.createCountdown(countdownModal.title.trim(), deadline.toISOString(), currentUser.user_id);
-                                                if (result) {
-                                                    setCountdownData(result);
-                                                    setCountdownModal({ isOpen: false, title: '', date: '', time: '' });
-                                                    setModal({ isOpen: true, title: '카운트 설정 완료', message: '팀원 페이지에 카운트다운이 표시됩니다.', type: 'success', action: closeModal });
+                                                if (countdownModal.editId) {
+                                                    const result = await SupabaseAPI.updateCountdown(countdownModal.editId, countdownModal.title.trim(), deadline.toISOString());
+                                                    if (result) {
+                                                        setCountdownData(result);
+                                                        setCountdownModal({ isOpen: false, title: '', date: '', time: '' });
+                                                        setModal({ isOpen: true, title: '카운트 수정 완료', message: '카운트다운이 수정되었습니다.', type: 'success', action: closeModal });
+                                                    } else {
+                                                        alert('카운트 수정에 실패했습니다.');
+                                                    }
                                                 } else {
-                                                    alert('카운트 설정에 실패했습니다.');
+                                                    const result = await SupabaseAPI.createCountdown(countdownModal.title.trim(), deadline.toISOString(), currentUser.user_id);
+                                                    if (result) {
+                                                        setCountdownData(result);
+                                                        setCountdownModal({ isOpen: false, title: '', date: '', time: '' });
+                                                        setModal({ isOpen: true, title: '카운트 설정 완료', message: '팀원 페이지에 카운트다운이 표시됩니다.', type: 'success', action: closeModal });
+                                                    } else {
+                                                        alert('카운트 설정에 실패했습니다.');
+                                                    }
                                                 }
                                             }} className="flex-1 px-4 py-2.5 bg-amber-500 text-white font-bold rounded-xl hover:bg-amber-600 transition flex items-center justify-center gap-1.5">
-                                                <Play size={14} /> 카운트 시작
+                                                {countdownModal.editId ? <><Edit size={14} /> 수정 완료</> : <><Play size={14} /> 카운트 시작</>}
                                             </button>
                                         </div>
                                     </div>
